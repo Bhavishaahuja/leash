@@ -38,6 +38,8 @@ it, "unsure" means Leash couldn't tell.
 - intent_check.watch_mode: "normal" means "Leash was in its normal review mode". "sharp" means \
 "Leash was in a stricter mode it uses when approvals have been coming in very fast, and it \
 sends fewer orders to a person".
+- mandate.max_price_inclusive: write the cap the way a person would. true is "up to $90", \
+false is "under $90". Never add "(inclusive)", "(not inclusive)" or "(exclusive)".
 - decision.decision_ms: as seconds, e.g. "decided 0.7 seconds after opening the order".
 - Dates and times: like "November 6, 2026 at 16:42 UTC", not ISO timestamps.
 

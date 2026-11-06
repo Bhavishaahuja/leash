@@ -19,7 +19,7 @@
 # read first: GET .../evidence saves it, and submit sends exactly that saved text.
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -92,6 +92,8 @@ class DisputeOut(BaseModel):
     evidence_type: str | None
     # a summary has been drafted, so submit can go
     has_summary: bool
+    # as of the last sync. the dashboard counts down to it
+    seller_response_due_at: datetime | None
     created_at: datetime
 
 
@@ -126,6 +128,7 @@ def dispute_out(dispute):
         evidence_submitted_at=dispute.evidence_submitted_at,
         evidence_type=dispute.evidence_type,
         has_summary=bool(dispute.evidence_summary),
+        seller_response_due_at=dispute.seller_response_due_at,
         created_at=dispute.created_at,
     )
 
@@ -562,18 +565,37 @@ def save_dispute(session, order, details):
     existing = session.scalars(
         select(Dispute).where(Dispute.paypal_dispute_id == paypal_dispute_id)
     ).first()
+    due_at = parse_paypal_time(details.get("seller_response_due_date"))
     if existing is not None:
         existing.reason = details.get("reason")
         existing.status = details.get("status")
+        # copied every time, null included: PayPal drops the date once it's not waiting on us,
+        # and a stale deadline on the dashboard would be wrong
+        existing.seller_response_due_at = due_at
         return False
     session.add(Dispute(
         paypal_dispute_id=paypal_dispute_id,
         order_id=order.id,
         reason=details.get("reason"),
         status=details.get("status"),
+        seller_response_due_at=due_at,
     ))
     session.flush()
     return True
+
+
+def parse_paypal_time(value):
+    # PayPal sends e.g. "2026-11-17T04:59:59.000Z". a missing or odd value just means no deadline
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        logger.warning("Couldn't read PayPal time %r", value)
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 @router.get("/{dispute_id}/evidence", response_model=EvidenceOut)
@@ -581,24 +603,67 @@ def get_evidence(dispute_id: int, session: DbSession, claude: Claude):
     dispute = load_dispute(session, dispute_id)
     packet = build_evidence_packet(dispute)
 
-    # once it's filed, show what was sent. a fresh draft would no longer match PayPal's copy
-    if dispute.evidence_submitted_at is not None:
+    # a saved draft is what submit will send, so that's what gets shown. looking at the page
+    # again must not change the text, a new one only comes from POST /redraft. after a submit
+    # this is also exactly what PayPal has
+    if dispute.evidence_summary or dispute.evidence_submitted_at is not None:
         return EvidenceOut(
             dispute=dispute_out(dispute), packet=packet, summary=dispute.evidence_summary or ""
         )
 
+    # first look: nothing drafted yet, so draft one
+    summary = draft_or_502(claude, packet, dispute_id)
+    session.rollback()
+    dispute = load_dispute(session, dispute_id, lock=True)
+    if dispute.evidence_summary:
+        # two first looks at once: keep the one already saved, so both see the same text
+        summary = dispute.evidence_summary
+    else:
+        dispute.evidence_summary = summary
+    session.commit()
+    return EvidenceOut(dispute=dispute_out(dispute), packet=packet, summary=summary)
+
+
+@router.post("/{dispute_id}/redraft", response_model=EvidenceOut)
+def redraft_evidence(dispute_id: int, session: DbSession, claude: Claude):
+    # replaces the saved draft with a new one, on purpose
+    dispute = load_dispute(session, dispute_id)
+    blocker = redraft_blocker(dispute)
+    if blocker:
+        raise conflict(session, blocker)
+    packet = build_evidence_packet(dispute)
+
+    # no row lock while Claude writes (that's seconds), so check again before saving: a submit
+    # may have started meanwhile, and it's sending the old text
+    summary = draft_or_502(claude, packet, dispute_id)
+    session.rollback()
+    dispute = load_dispute(session, dispute_id, lock=True)
+    blocker = redraft_blocker(dispute)
+    if blocker:
+        raise conflict(session, blocker)
+    dispute.evidence_summary = summary
+    session.commit()
+    return EvidenceOut(dispute=dispute_out(dispute), packet=packet, summary=summary)
+
+
+def redraft_blocker(dispute):
+    # why the summary can't change right now, or None
+    if dispute.evidence_submitted_at is not None:
+        return "Evidence was already submitted, the summary is what PayPal has now"
+    if dispute.evidence_claimed_at is not None:
+        if utc_now() - as_utc(dispute.evidence_claimed_at) < CLAIM_EXPIRES_AFTER:
+            return "A submit for this dispute is in progress"
+    return None
+
+
+def draft_or_502(claude, packet, dispute_id):
     try:
-        summary = draft_summary(claude, packet)
+        return draft_summary(claude, packet)
     except SummaryFailed as error:
         logger.exception("Dispute summary failed for dispute %s", dispute_id)
         raise HTTPException(
             status_code=502, detail={"message": "Couldn't draft the summary, try again"}
         ) from error
-
-    # saved so submit sends exactly what the merchant just read
-    dispute.evidence_summary = summary
-    session.commit()
-    return EvidenceOut(dispute=dispute_out(dispute), packet=packet, summary=summary)
 
 
 @router.post("/{dispute_id}/submit-evidence", response_model=DisputeOut)

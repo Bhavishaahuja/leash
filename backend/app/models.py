@@ -258,6 +258,9 @@ class Dispute(Base):
     evidence_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # PayPal took the evidence. once set, submit refuses
     evidence_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # PayPal's seller_response_due_date: miss it and the dispute closes in the buyer's favor.
+    # null when PayPal isn't waiting on us (e.g. while it's under review)
+    seller_response_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = created_at_column()
 
     order: Mapped[Order] = relationship()

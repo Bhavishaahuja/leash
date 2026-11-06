@@ -26,6 +26,7 @@ from backend.app.disputes import (
     clean_summary,
     evidence_blocker,
     leaked_field_names,
+    parse_paypal_time,
 )
 from backend.app.models import (
     Approval,
@@ -127,6 +128,8 @@ class FakeClaude:
         self.stop_reason = "end_turn"
         self.error = None
         self.requests = []
+        # runs while "Claude is writing", for something that happens in the meantime
+        self.before_reply = None
         self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._create))
 
     def with_options(self, **options):
@@ -134,6 +137,8 @@ class FakeClaude:
 
     def _create(self, **kwargs):
         self.requests.append(kwargs)
+        if self.before_reply:
+            self.before_reply()
         if self.error:
             raise self.error
         block = SimpleNamespace(type="text", text=self.text)
@@ -300,6 +305,36 @@ def test_sync_twice_updates_instead_of_copying(client, paypal, db_sessions):
         assert rows[0].status == "UNDER_REVIEW"
 
 
+def test_sync_saves_the_response_deadline_and_clears_it_when_paypal_does(
+        client, paypal, db_sessions):
+    details = dispute_details(AUTO_DISPUTE, AUTO_CAPTURE_ID)
+    # PP-R-OZB-10196878's real value after escalating
+    details["seller_response_due_date"] = "2026-11-17T04:59:59.000Z"
+    paypal.add_dispute(details, AUTO_CAPTURE_ID)
+
+    client.post("/disputes/sync")
+    listed = client.get("/disputes").json()
+
+    # sqlite drops the zone on the way back, Postgres keeps it
+    assert listed[0]["seller_response_due_at"].startswith("2026-11-17T04:59:59")
+    with db_sessions() as session:
+        saved = session.scalars(select(Dispute)).one().seller_response_due_at
+        assert saved.replace(tzinfo=timezone.utc) == datetime(2026, 11, 17, 4, 59, 59,
+                                                              tzinfo=timezone.utc)
+
+    # under review, PayPal isn't waiting on us and drops the date. so do we
+    paypal.details[AUTO_DISPUTE]["status"] = "UNDER_REVIEW"
+    del paypal.details[AUTO_DISPUTE]["seller_response_due_date"]
+    client.post("/disputes/sync")
+    with db_sessions() as session:
+        assert session.scalars(select(Dispute)).one().seller_response_due_at is None
+
+
+@pytest.mark.parametrize("value", [None, "", "next tuesday"])
+def test_a_missing_or_odd_deadline_is_just_no_deadline(value):
+    assert parse_paypal_time(value) is None
+
+
 def test_sync_skips_a_dispute_that_doesnt_name_our_capture(client, paypal, db_sessions):
     # the list filter's target isn't spelled out, so the details have the last word
     paypal.add_dispute(dispute_details(AUTO_DISPUTE, "SOMEONE0ELSES0CAP"), AUTO_CAPTURE_ID)
@@ -337,7 +372,8 @@ def test_list_shape_and_submitted_flag(client, db_sessions):
     assert len(listed) == 2
     assert set(listed[0]) == {
         "id", "paypal_dispute_id", "order_id", "reason", "status", "evidence_submitted",
-        "evidence_submitted_at", "evidence_type", "has_summary", "created_at",
+        "evidence_submitted_at", "evidence_type", "has_summary", "seller_response_due_at",
+        "created_at",
     }
     by_paypal_id = {}
     for row in listed:
@@ -456,6 +492,8 @@ def test_the_prompt_asks_for_plain_english_not_field_names(client, db_sessions, 
     system = claude.requests[0]["system"]
     assert "never copy them into the notes" in system
     assert "Leash was in its normal review mode" in system
+    assert 'true is "up to $90", false is "under $90"' in system
+    assert 'Never add "(inclusive)", "(not inclusive)"' in system
 
 
 @pytest.mark.parametrize("leak", ["watch_mode was normal", "a risk_score of 100",
@@ -501,6 +539,96 @@ def test_after_submitting_evidence_shows_what_was_sent(client, db_sessions, clau
 
 def test_evidence_404s_on_an_unknown_dispute(client):
     assert client.get("/disputes/999/evidence").status_code == 404
+
+
+def test_looking_again_shows_the_saved_draft_without_calling_claude(client, db_sessions, claude):
+    dispute_id = add_dispute_row(db_sessions)
+    first = client.get("/disputes/" + str(dispute_id) + "/evidence").json()
+    claude.text = "A different draft."
+
+    second = client.get("/disputes/" + str(dispute_id) + "/evidence").json()
+
+    assert second["summary"] == first["summary"] == SUMMARY
+    assert len(claude.requests) == 1
+
+
+# ---- POST /disputes/{id}/redraft ----
+
+
+def test_redraft_replaces_the_saved_draft(client, db_sessions, claude):
+    dispute_id = add_dispute_row(db_sessions, evidence_summary="The old draft.")
+    claude.text = "A fresh draft."
+
+    response = client.post("/disputes/" + str(dispute_id) + "/redraft")
+
+    assert response.status_code == 200
+    assert response.json()["summary"] == "A fresh draft."
+    assert response.json()["packet"]["order"]["id"] == 1
+    assert len(claude.requests) == 1
+    assert saved_dispute(db_sessions, dispute_id).evidence_summary == "A fresh draft."
+    # and from now on that's what the page shows
+    shown = client.get("/disputes/" + str(dispute_id) + "/evidence").json()["summary"]
+    assert shown == "A fresh draft."
+
+
+def test_redraft_works_with_no_draft_yet(client, db_sessions, claude):
+    dispute_id = add_dispute_row(db_sessions)
+    assert client.post("/disputes/" + str(dispute_id) + "/redraft").json()["summary"] == SUMMARY
+
+
+def test_redraft_refuses_after_submitting(client, db_sessions, claude):
+    dispute_id = add_dispute_row(
+        db_sessions, evidence_summary="What we sent.",
+        evidence_submitted_at=datetime(2026, 11, 6, tzinfo=timezone.utc),
+    )
+
+    response = client.post("/disputes/" + str(dispute_id) + "/redraft")
+
+    assert response.status_code == 409
+    assert "already submitted" in response.json()["detail"]["message"]
+    assert claude.requests == []
+    assert saved_dispute(db_sessions, dispute_id).evidence_summary == "What we sent."
+
+
+def test_redraft_refuses_while_a_submit_is_running(client, db_sessions, claude):
+    dispute_id = add_dispute_row(db_sessions, evidence_summary=SUMMARY,
+                                 evidence_claimed_at=datetime.now(timezone.utc))
+
+    response = client.post("/disputes/" + str(dispute_id) + "/redraft")
+
+    assert response.status_code == 409
+    assert "in progress" in response.json()["detail"]["message"]
+    assert claude.requests == []
+
+
+def test_redraft_doesnt_save_if_a_submit_started_while_claude_was_writing(
+        client, db_sessions, claude):
+    dispute_id = add_dispute_row(db_sessions, evidence_summary="The text being sent.")
+
+    def submit_starts_meanwhile():
+        with db_sessions() as session:
+            session.get(Dispute, dispute_id).evidence_claimed_at = datetime.now(timezone.utc)
+            session.commit()
+
+    claude.before_reply = submit_starts_meanwhile
+    claude.text = "A fresh draft."
+
+    response = client.post("/disputes/" + str(dispute_id) + "/redraft")
+
+    assert response.status_code == 409
+    assert saved_dispute(db_sessions, dispute_id).evidence_summary == "The text being sent."
+
+
+def test_a_failed_redraft_keeps_the_old_draft(client, db_sessions, claude):
+    dispute_id = add_dispute_row(db_sessions, evidence_summary="The old draft.")
+    claude.error = RuntimeError("Claude is down")
+
+    assert client.post("/disputes/" + str(dispute_id) + "/redraft").status_code == 502
+    assert saved_dispute(db_sessions, dispute_id).evidence_summary == "The old draft."
+
+
+def test_redraft_404s_on_an_unknown_dispute(client):
+    assert client.post("/disputes/999/redraft").status_code == 404
 
 
 # ---- the gate: status and the provide-evidence link ----
@@ -723,6 +851,7 @@ def test_submit_404s_on_an_unknown_dispute(client):
     ("GET", "/disputes"),
     ("POST", "/disputes/sync"),
     ("GET", "/disputes/1/evidence"),
+    ("POST", "/disputes/1/redraft"),
     ("POST", "/disputes/1/submit-evidence"),
 ])
 def test_every_dispute_route_is_merchant_only(app, db_sessions, paypal, claude, method, path):
