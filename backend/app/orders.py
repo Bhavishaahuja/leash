@@ -37,7 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
-from backend.app import mandate_parser
+from backend.app import mandate_parser, rubber_stamp
 from backend.app.auth import require_agent, require_merchant
 from backend.app.config import STORE_NAME, get_settings
 from backend.app.db import get_session
@@ -52,6 +52,7 @@ from backend.app.models import (
     OrderStatus,
     ReviewState,
     Verdict,
+    WatchMode,
 )
 from backend.app.paypal_client import PayPalError, client_from_settings, first_authorization
 
@@ -171,6 +172,9 @@ class OrderOut(BaseModel):
     # null until there's a hold to decide about
     review_state: ReviewState | None
     authorization_expires_at: datetime | None
+    # whether the rubber-stamp watch was on when this was checked. merchant only: an agent that
+    # could see sharp mode would know when doubtful orders stop being escalated
+    watch_mode: WatchMode
     created_at: datetime
     mandate: MandateSummary
     # the newest check result. null until the order is checked, or if saving the result failed
@@ -483,8 +487,10 @@ def record_tap(session, order_id, tap):
     approval.client_decision_ms = tap.client_decision_ms
 
 
-def finish_capture(session, order_id, capture, review_state, tap=None):
-    # returns True if the money was taken. a decline leaves review_state as it was
+def finish_capture(session, order_id, capture, review_state, tap=None, check_reason=None):
+    # returns True if the money was taken. a decline leaves review_state as it was.
+    # check_reason replaces the intent check's reason, in the same commit as the capture, so the
+    # record can't say one thing while the money says another
     order = load_order(session, order_id, lock=True)
     order.capture_id = capture.get("id")
     order.payment_claimed_at = None
@@ -496,21 +502,29 @@ def finish_capture(session, order_id, capture, review_state, tap=None):
         order.review_state = review_state
         if tap is not None:
             record_tap(session, order_id, tap)
+        if check_reason is not None and order.intent_check is not None:
+            order.intent_check.reason = check_reason
     else:
         order.status = OrderStatus.failed
     session.commit()
     return captured
 
 
-def auto_decide(session, order_id, paypal):
+def auto_decide(session, order_id, paypal, watch_active=False):
     # the order is already needs_review, so this only ever has to do something to move money.
     # returning early is the safe outcome for every odd case, including a null intent_check
     order = load_order(session, order_id)
     check = order.intent_check
-    if check is None or check.verdict != Verdict.match or check.risk_score is None:
+    if check is None:
         return
-    if check.risk_score >= get_settings().auto_capture_max_risk:
+    if rubber_stamp.should_escalate(check, watch_active):
         return
+
+    # normal mode would have sent this one to a human. the dashboard has to say why it didn't,
+    # but only once the money is actually taken, a failed capture still goes to review
+    check_reason = None
+    if rubber_stamp.let_through_by_watch(check, watch_active):
+        check_reason = rubber_stamp.LET_THROUGH_REASON
 
     order, blocker = claim_order(session, order_id)
     if blocker is not None:
@@ -528,7 +542,9 @@ def auto_decide(session, order_id, paypal):
         return
 
     try:
-        captured = finish_capture(session, order_id, capture, ReviewState.auto_approved)
+        captured = finish_capture(
+            session, order_id, capture, ReviewState.auto_approved, check_reason=check_reason
+        )
     except SQLAlchemyError:
         # stays needs_review with the claim on it. once that expires, approving sends the same
         # PayPal-Request-Id, gets this same capture back, and saves it
@@ -545,17 +561,37 @@ def auto_decide(session, order_id, paypal):
 
 def check_and_decide(session, order, paypal, claude):
     order_id = order.id
-    check_and_save(session, order, claude)
+
+    # before the check, not just before auto-decide: the check needs to know too, it's what
+    # writes the sharp reason. same answer for both, so the two can't disagree
+    watch_active = watch_for(session, order_id)
+    if watch_active:
+        order.watch_mode = WatchMode.sharp
+    else:
+        order.watch_mode = WatchMode.normal
+
+    # check_and_save's first commit saves watch_mode along with everything else
+    check_and_save(session, order, claude, sharp=watch_active)
     # the hold is committed and the agent is about to get an answer. failing here would look like
     # the purchase failed and could make it buy again, and the order is safely in needs_review
     try:
-        auto_decide(session, order_id, paypal)
+        auto_decide(session, order_id, paypal, watch_active)
     except SQLAlchemyError:
         session.rollback()
         logger.exception("Auto-decide failed for order %s, sending to review", order_id)
 
 
-def check_and_save(session, order, claude):
+def watch_for(session, order_id):
+    # if we can't read the history, normal mode is the safe guess: it escalates more, not less
+    try:
+        return rubber_stamp.watch_is_on(session)
+    except SQLAlchemyError:
+        session.rollback()
+        logger.exception("Couldn't read the rubber-stamp watch for order %s", order_id)
+        return False
+
+
+def check_and_save(session, order, claude, sharp=False):
     # the order was committed as authorized before this runs, so whatever happens in here the
     # hold is on record and it's waiting for review
     mandate = order.mandate
@@ -564,7 +600,7 @@ def check_and_save(session, order, claude):
     # pool instead of sitting on one that long. objects stay usable, expire_on_commit is off
     session.commit()
 
-    result = run_intent_check(mandate, order, client=claude)
+    result = run_intent_check(mandate, order, client=claude, sharp=sharp)
 
     # a failed save can't fail the request: the agent would see an error and may buy again,
     # placing a second hold. the order just comes back with intent_check null

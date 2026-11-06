@@ -55,6 +55,13 @@ class ReviewState(str, enum.Enum):
     rejected = "rejected"
 
 
+class WatchMode(str, enum.Enum):
+    # which mode the rubber-stamp watch was in when this order got checked, see rubber_stamp.py
+    normal = "normal"
+    # the human had been approving too fast: fewer escalations, sharper reasons
+    sharp = "sharp"
+
+
 def string_enum(enum_class, name):
     # store enums as plain strings with a CHECK constraint instead of a Postgres enum
     # type, so adding a value later is a simple migration
@@ -135,6 +142,14 @@ class Order(Base):
     review_token_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # PayPal authorizations last 29 days (spike 2), the human has to decide before this
     authorization_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # set when the order gets checked. orders that never got that far (no hold yet, or PayPal
+    # failed) were never judged in sharp mode, so normal is true for them too
+    watch_mode: Mapped[WatchMode] = mapped_column(
+        string_enum(WatchMode, "watch_mode"),
+        default=WatchMode.normal,
+        server_default=WatchMode.normal.value,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = created_at_column()
 
     mandate: Mapped[Mandate] = relationship(back_populates="orders")
@@ -185,6 +200,16 @@ class Decision(Base):
     created_at: Mapped[datetime] = created_at_column()
 
     order: Mapped[Order] = relationship(back_populates="decisions")
+
+    @property
+    def hard_rule_failed(self):
+        # any of the deterministic rules said no. null on rows saved before rule_results existed
+        if not self.rule_results:
+            return False
+        for result in self.rule_results:
+            if not result.get("passed"):
+                return True
+        return False
 
 
 class Approval(Base):

@@ -11,7 +11,7 @@ There are four kinds of caller. Sending the wrong credential, or none, returns `
 | Caller | Sends | Can reach |
 |---|---|---|
 | Shopping agent | `X-API-Key: <AGENT_API_KEY>` | `POST /mandates`, `POST /orders`, `POST /orders/{id}/authorize`, `GET /agent/orders/{id}` |
-| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `POST /orders/{id}/review-link`, `POST /demo/orders` |
+| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `GET /stats`, `POST /orders/{id}/review-link`, `POST /demo/orders` |
 | Merchant scripts | `X-API-Key: <MERCHANT_API_KEY>` | The same as the dashboard |
 | Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject` |
 
@@ -112,6 +112,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
   "status": "authorized",
   "review_state": "needs_review",
   "authorization_expires_at": "2026-12-03T01:56:55Z",
+  "watch_mode": "normal",
   "created_at": "2026-11-05T15:04:05Z",
   "mandate": {
     "id": 7,
@@ -159,6 +160,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 - **`max_price_inclusive`**: `true` means "up to" and `false` means "under".
 - **`intent_check`** is `null` before the order is checked. It's also `null` if saving the result failed, and that order will be in `needs_review` with nothing to explain why, so handle a missing reason.
 - **`approval`** is `null` until the confirm page reports it rendered. It then exists with `action: null` until they decide. Auto-approved orders never have one.
+- **`watch_mode`** is `normal` or `sharp`: whether the rubber-stamp watch was on when the order was checked. Never `null`. Orders that were never checked are `normal`. Agents never see it. See [The rubber-stamp watch](#the-rubber-stamp-watch).
 
 ### `intent_check`
 
@@ -173,6 +175,8 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 | `checked_by` | `rules`, `ai` | Note: this used to be `claude` |
 
 `reason` can end in `(+2 more)` when several rules failed. The full list is in `rule_results`.
+
+In sharp mode, `reason` reads "Mandate said X, order has Y", under 12 words, with no `(+N more)`. An order the watch let through and captured has `reason` set to exactly `Let through: low risk while rubber-stamp watch was on`. Its `verdict` and `risk_score` are still what the check said.
 
 ### `approval`
 
@@ -223,6 +227,49 @@ A list of mandates, newest first, in the same shape as `GET /mandates/{id}`. `li
 ### `GET /mandates/{id}`
 
 The mandate, including `rules` and `max_price`. `raw_request` is the shopper's own words. `rules` holds the parsed fields, including `item`, `color`, `size` and `quantity`, and `max_price`, `merchant` and `expires_at` are at the top level.
+
+### `GET /stats`
+
+Counts for the dashboard, plus where the rubber-stamp watch stands.
+
+```json
+{
+  "total_orders": 42,
+  "auto_captured": 30,
+  "needs_review": 2,
+  "approved": 7,
+  "voided": 3,
+  "median_decision_ms": 1500,
+  "fast_streak": 3,
+  "rubber_stamp_active": true,
+  "fast_threshold_ms": 2000,
+  "recent_decision_ms": [300, 900, 1500, 8000, 4000]
+}
+```
+
+| Field | Notes |
+|---|---|
+| `auto_captured` | Orders Leash captured on its own (`review_state` is `auto_approved`) |
+| `needs_review` | Holds waiting on a human right now |
+| `approved` | A human tapped approve |
+| `voided` | Every order whose hold was released |
+| `median_decision_ms` | Over every human decision. `null` until there is one |
+| `fast_streak` | Fast approvals in a row, newest first |
+| `rubber_stamp_active` | `true` once `fast_streak` reaches 3. The next order is checked in sharp mode |
+| `fast_threshold_ms` | An approval under this counts as fast |
+| `recent_decision_ms` | The last 10 human decisions, newest first. An entry can be `null` on old rows |
+
+## The rubber-stamp watch
+
+A human who approves escalated orders without reading them isn't really reviewing anything. So when the last 3 human decisions were all approvals under 2 seconds (`decision_ms`, the server's number), the watch turns on. One reject or one slow approval turns it off.
+
+While it's on, orders are checked in sharp mode:
+
+- **Still always escalated:** any failed hard rule, any `mismatch`, and any check that couldn't run (Claude down or timed out).
+- **Otherwise escalated only if** `risk_score` is 60 or more. Below that, the order is captured and its `reason` says it was let through.
+- **Reasons are sharper:** "Mandate said black, order has olive", so the next look is a real one.
+
+The watch is global, not per shopper.
 
 ## Review endpoints
 

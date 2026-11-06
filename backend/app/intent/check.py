@@ -12,7 +12,13 @@ from dataclasses import dataclass, field
 
 from backend.app import mandate_parser
 from backend.app.config import get_settings
-from backend.app.intent.ai_check import FAILED_REASON, FAILED_RISK_SCORE, check_order_intent
+from backend.app.intent.ai_check import (
+    FAILED_REASON,
+    FAILED_RISK_SCORE,
+    SHARP_MAX_WORDS,
+    check_order_intent,
+    limit_words,
+)
 from backend.app.intent.rules import (
     RULE_CURRENCY,
     RULE_EXPIRY,
@@ -48,11 +54,12 @@ class IntentCheckResult:
     latency_ms: int = 0
 
 
-def run_intent_check(mandate, order, client=None, now=None, clock=time.monotonic):
-    # client, now and clock are for tests and for sharing one Anthropic client across requests
+def run_intent_check(mandate, order, client=None, now=None, clock=time.monotonic, sharp=False):
+    # client, now and clock are for tests and for sharing one Anthropic client across requests.
+    # sharp is on while the rubber-stamp watch is: reasons come out as "Mandate said X, order has Y"
     started = clock()
     try:
-        return run_checks(mandate, order, client, now, clock, started)
+        return run_checks(mandate, order, client, now, clock, started, sharp)
     except Exception:
         # Claude's own failures are handled inside ai_check.py, so this means the rules or our
         # own code broke. don't carry on to Claude with rules we couldn't run
@@ -66,17 +73,17 @@ def run_intent_check(mandate, order, client=None, now=None, clock=time.monotonic
         )
 
 
-def run_checks(mandate, order, client, now, clock, started):
+def run_checks(mandate, order, client, now, clock, started, sharp=False):
     rule_results = check_hard_rules(mandate, order, now=now)
 
     # any failure stops here, which is cheaper and the reason is exact
     if hard_rules_verdict(rule_results) is not None:
-        return rejected_by_rules(rule_results, clock, started)
+        return rejected_by_rules(rule_results, clock, started, sharp)
 
     if client is None:
         client = mandate_parser.make_client(get_settings().anthropic_api_key)
 
-    ai_result = check_order_intent(client, mandate, order)
+    ai_result = check_order_intent(client, mandate, order, sharp=sharp)
     return IntentCheckResult(
         verdict=ai_result.verdict,
         risk_score=ai_result.risk_score,
@@ -88,18 +95,28 @@ def run_checks(mandate, order, client, now, clock, started):
     )
 
 
-def rejected_by_rules(rule_results, clock, started):
+def rejected_by_rules(rule_results, clock, started, sharp=False):
     failed_rules = []
     reason_by_rule = {}
+    sharp_reason_by_rule = {}
     for result in rule_results:
         if not result.passed:
             failed_rules.append(result.rule)
             reason_by_rule[result.rule] = result.reason
+            sharp_reason_by_rule[result.rule] = result.sharp_reason or result.reason
+
+    if sharp:
+        # just the top failure, no "(+1 more)": every word counts against the limit, and
+        # rule_results still has the full list
+        top_rule = leading_rule(failed_rules, reason_by_rule)
+        reason = limit_words(sharp_reason_by_rule[top_rule], SHARP_MAX_WORDS)
+    else:
+        reason = leading_reason(failed_rules, reason_by_rule)
 
     return IntentCheckResult(
         verdict=Verdict.mismatch,
         risk_score=HARD_RULE_RISK_SCORE,
-        reason=leading_reason(failed_rules, reason_by_rule),
+        reason=reason,
         mismatched_fields=failed_rules,
         rule_results=rule_results,
         checked_by=CheckedBy.rules,
@@ -107,16 +124,17 @@ def rejected_by_rules(rule_results, clock, started):
     )
 
 
-def leading_reason(failed_rules, reason_by_rule):
-    # one line: the top failure plus a count of the rest. rule_results has the full list
+def leading_rule(failed_rules, reason_by_rule):
     # a rule someone adds later without a priority still gets reported, just not first
-    leading_rule = failed_rules[0]
     for rule in RULE_PRIORITY:
         if rule in reason_by_rule:
-            leading_rule = rule
-            break
+            return rule
+    return failed_rules[0]
 
-    reason = reason_by_rule[leading_rule]
+
+def leading_reason(failed_rules, reason_by_rule):
+    # one line: the top failure plus a count of the rest. rule_results has the full list
+    reason = reason_by_rule[leading_rule(failed_rules, reason_by_rule)]
     others = len(failed_rules) - 1
     if others > 0:
         reason += " (+" + str(others) + " more)"
