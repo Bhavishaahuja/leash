@@ -1,4 +1,4 @@
-# the four tables Leash needs for week 1. field choices follow spikes/README.md
+# the tables Leash needs. field choices follow spikes/README.md (disputes: spike 3)
 
 import enum
 from datetime import datetime
@@ -234,3 +234,30 @@ class Approval(Base):
     client_decision_ms: Mapped[int | None] = mapped_column(Integer)
 
     order: Mapped[Order] = relationship(back_populates="approvals")
+
+
+class Dispute(Base):
+    # a PayPal dispute on one of our captured orders, and the evidence Leash filed for it.
+    # reason and status are PayPal's own strings (UNAUTHORISED, WAITING_FOR_SELLER_RESPONSE...),
+    # kept as plain text since PayPal can add values without telling us
+    __tablename__ = "disputes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # like PP-R-ABC-10001234. unique, so a second sync updates the row instead of copying it
+    paypal_dispute_id: Mapped[str] = mapped_column(String(64), unique=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    reason: Mapped[str | None] = mapped_column(String(100))
+    status: Mapped[str | None] = mapped_column(String(64))
+    # the summary Claude drafted for the PayPal reviewer. the merchant reads it on GET .../evidence
+    # and that exact text is what submit sends as the notes
+    evidence_summary: Mapped[str | None] = mapped_column(Text)
+    # what we filed as, e.g. OTHER. null until submitted
+    evidence_type: Mapped[str | None] = mapped_column(String(64))
+    # set while a submit is on its way to PayPal, so a second one can't go too. same idea as
+    # Order.payment_claimed_at
+    evidence_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # PayPal took the evidence. once set, submit refuses
+    evidence_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = created_at_column()
+
+    order: Mapped[Order] = relationship()

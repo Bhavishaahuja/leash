@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app import demo, mandates, orders, review, session, stats
+from backend.app import demo, disputes, mandates, orders, review, session, stats
 from backend.app.config import cors_origins, get_settings
 from backend.app.log_redaction import install_log_redaction
 
@@ -27,6 +27,7 @@ app.include_router(review.router)
 app.include_router(session.router)
 app.include_router(demo.router)
 app.include_router(stats.router)
+app.include_router(disputes.router)
 
 
 @app.get("/health")

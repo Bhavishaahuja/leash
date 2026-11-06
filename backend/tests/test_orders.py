@@ -1462,13 +1462,14 @@ def test_every_route_in_the_app_needs_a_key():
         if route_path in ("/health", "/auth/session") or route_path.startswith("/review/"):
             continue
         path = route_path.replace("{order_id}", "1").replace("{mandate_id}", "1")
+        path = path.replace("{dispute_id}", "1")
         for method in operations:
             assert no_key.request(method, path).status_code == 401, method + " " + route_path
             checked += 1
     # three for mandates, four for orders, one for review links, one for agent status, two for the
-    # demo routes, one for stats. if this drops to 0 the loop above isn't checking anything, so it
-    # can't just pass
-    assert checked == 12
+    # demo routes, one for stats, four for disputes. if this drops to 0 the loop above isn't
+    # checking anything, so it can't just pass
+    assert checked == 16
 
 
 # ---- session tokens on the real routes ----

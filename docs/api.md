@@ -11,7 +11,7 @@ There are four kinds of caller. Sending the wrong credential, or none, returns `
 | Caller | Sends | Can reach |
 |---|---|---|
 | Shopping agent | `X-API-Key: <AGENT_API_KEY>` | `POST /mandates`, `POST /orders`, `POST /orders/{id}/authorize`, `GET /agent/orders/{id}` |
-| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `GET /stats`, `POST /orders/{id}/review-link`, `POST /demo/orders` |
+| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `GET /stats`, `POST /orders/{id}/review-link`, `POST /demo/orders`, every `/disputes` route |
 | Merchant scripts | `X-API-Key: <MERCHANT_API_KEY>` | The same as the dashboard |
 | Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject` |
 
@@ -270,6 +270,89 @@ While it's on, orders are checked in sharp mode:
 - **Reasons are sharper:** "Mandate said black, order has olive", so the next look is a real one.
 
 The watch is global, not per shopper.
+
+## Disputes
+
+When a buyer disputes a captured order, Leash files its records with PayPal as evidence: what the buyer authorized, what was ordered, how it was checked, and who released the money. All four routes are merchant only.
+
+The usual flow is: sync, open the evidence (this drafts the summary), read it, then submit.
+
+### The dispute object
+
+```json
+{
+  "id": 3,
+  "paypal_dispute_id": "PP-R-ABC-10001234",
+  "order_id": 12,
+  "reason": "UNAUTHORISED",
+  "status": "WAITING_FOR_SELLER_RESPONSE",
+  "evidence_submitted": false,
+  "evidence_submitted_at": null,
+  "evidence_type": null,
+  "has_summary": true,
+  "created_at": "2026-11-06T14:00:00Z"
+}
+```
+
+- **`reason`** and **`status`** are PayPal's own strings, stored as they come. Show them as is. `status` is as of the last sync or submit, so it can be behind PayPal.
+- **`has_summary`**: a summary has been drafted, so submit can go.
+- **`evidence_type`** is what was filed, like `OTHER`. `null` until then.
+
+### `GET /disputes?limit=50`
+
+Dispute objects, newest first. `limit` is capped at 200.
+
+### `POST /disputes/sync`
+
+No body. For every captured order, asks PayPal for disputes on its capture ID, and saves or updates them. A dispute only counts if PayPal's details name that capture as the seller transaction. Success is a `200`:
+
+```json
+{ "orders_checked": 12, "disputes_found": 1, "created": 1, "updated": 0, "errors": [] }
+```
+
+A PayPal failure on one order doesn't stop the rest. It shows up in `errors` as `{"order_id": 4, "message": "..."}`. This makes PayPal calls per captured order, so it can take a few seconds.
+
+### `GET /disputes/{id}/evidence`
+
+The evidence packet plus a summary for the PayPal reviewer. Nothing is sent to PayPal.
+
+```json
+{
+  "dispute": { "...": "the dispute object" },
+  "packet": {
+    "dispute": { "paypal_dispute_id": "PP-R-ABC-10001234", "reason": "UNAUTHORISED", "status": "WAITING_FOR_SELLER_RESPONSE" },
+    "mandate": { "id": 7, "raw_request": "Black trail runners, women's size 9, up to $120, from Fernwood Supply Co.", "rules": { }, "max_price": "120.00", "max_price_inclusive": true, "merchant": "Fernwood Supply Co", "expires_at": null, "created_at": "..." },
+    "order": { "id": 12, "store": "Fernwood Supply Co", "items": [ ], "total": "98.00", "shipping_amount": "0.00", "currency": "USD", "status": "captured", "paypal_order_id": "...", "capture_id": "...", "created_at": "..." },
+    "intent_check": { "verdict": "match", "risk_score": 5, "reason": "Matches the mandate.", "mismatched_fields": [], "checked_by": "ai", "checked_at": "...", "watch_mode": "normal" },
+    "decision": { "released_by": "automatic capture", "review_state": "auto_approved", "action": "capture", "decision_ms": null, "decided_at": "..." }
+  },
+  "summary": "The buyer told their agent: ..."
+}
+```
+
+- **`decision`**: for a human approval, `released_by` is `human review`, with `decision_ms` (the server's own number), `opened_at` and `decided_at`. For an automatic capture, `decided_at` is the check's time, since the capture follows it straight away.
+- **`intent_check`** can be `null` if no check was saved.
+- The packet leaves out `buyer_label`.
+- **`summary`** is drafted by Claude from the packet and saved on the dispute: 3 to 6 plain sentences, 1500 characters at most. It sticks to what's in the packet, including facts that don't help the merchant. It's written for a PayPal reviewer, so it puts the packet's fields in plain English ("a risk rating of 100 out of 100", "Leash was in its normal review mode") and never uses a field name like `watch_mode`. Each call drafts a new one, and the newest is what submit sends. Once evidence is submitted, this returns the summary that was sent and doesn't draft again.
+- `502` if the summary couldn't be drafted, including when a draft still contains one of the packet's field names. Try again. `404` if there's no such dispute.
+
+### `POST /disputes/{id}/submit-evidence`
+
+No body. Sends PayPal a PDF of the packet, with the saved summary as the notes. Success is a `200` with the dispute object, now with `evidence_submitted: true`.
+
+Before sending, it reads the dispute from PayPal and checks:
+
+| Check | If it fails |
+|---|---|
+| Evidence not already submitted | `409`, `detail.evidence_submitted_at` says when |
+| No other submit in progress | `409`. A submit that crashed frees up after 2 minutes |
+| A summary was drafted | `409`, open `GET /disputes/{id}/evidence` first |
+| PayPal's status is `WAITING_FOR_SELLER_RESPONSE` **and** its details have a `provide-evidence` link | `409` with `detail.status` and `detail.provide_evidence_link`, so the page can say which. The row gets PayPal's latest status |
+| PayPal asked for an evidence type Leash can fill | `409` with `detail.requested_types` (see below) |
+
+The evidence type is the first one PayPal requested from the seller. If it requested nothing, it's `OTHER`, and the notes start with a sentence saying so. Leash never sends `PROOF_OF_FULFILLMENT`, `PROOF_OF_REFUND` or `PROOF_OF_RETURN`, because PayPal requires tracking or refund IDs for those and Leash has none. If those are all PayPal asked for, the merchant has to answer in PayPal's Resolution Center.
+
+If PayPal rejects the evidence, the response is a `502` with the same `paypal_*` fields as the order endpoints, and nothing is marked as submitted, so it can be tried again.
 
 ## Review endpoints
 
