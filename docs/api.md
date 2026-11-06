@@ -273,9 +273,9 @@ The watch is global, not per shopper.
 
 ## Disputes
 
-When a buyer disputes a captured order, Leash files its records with PayPal as evidence: what the buyer authorized, what was ordered, how it was checked, and who released the money. All four routes are merchant only.
+When a buyer disputes a captured order, Leash files its records with PayPal as evidence: what the buyer authorized, what was ordered, how it was checked, and who released the money. All five routes are merchant only.
 
-The usual flow is: sync, open the evidence (this drafts the summary), read it, then submit.
+The usual flow is: sync, open the evidence (the first look drafts the summary), read it, redraft if it needs another go, then submit.
 
 ### The dispute object
 
@@ -290,6 +290,7 @@ The usual flow is: sync, open the evidence (this drafts the summary), read it, t
   "evidence_submitted_at": null,
   "evidence_type": null,
   "has_summary": true,
+  "seller_response_due_at": "2026-11-17T04:59:59Z",
   "created_at": "2026-11-06T14:00:00Z"
 }
 ```
@@ -297,6 +298,7 @@ The usual flow is: sync, open the evidence (this drafts the summary), read it, t
 - **`reason`** and **`status`** are PayPal's own strings, stored as they come. Show them as is. `status` is as of the last sync or submit, so it can be behind PayPal.
 - **`has_summary`**: a summary has been drafted, so submit can go.
 - **`evidence_type`** is what was filed, like `OTHER`. `null` until then.
+- **`seller_response_due_at`**: PayPal's `seller_response_due_date`, as of the last sync. Miss it and PayPal closes the dispute in the buyer's favor, so it's the one to count down. `null` when PayPal isn't waiting on the merchant (under review, say), and sync clears it then.
 
 ### `GET /disputes?limit=50`
 
@@ -333,8 +335,20 @@ The evidence packet plus a summary for the PayPal reviewer. Nothing is sent to P
 - **`decision`**: for a human approval, `released_by` is `human review`, with `decision_ms` (the server's own number), `opened_at` and `decided_at`. For an automatic capture, `decided_at` is the check's time, since the capture follows it straight away.
 - **`intent_check`** can be `null` if no check was saved.
 - The packet leaves out `buyer_label`.
-- **`summary`** is drafted by Claude from the packet and saved on the dispute: 3 to 6 plain sentences, 1500 characters at most. It sticks to what's in the packet, including facts that don't help the merchant. It's written for a PayPal reviewer, so it puts the packet's fields in plain English ("a risk rating of 100 out of 100", "Leash was in its normal review mode") and never uses a field name like `watch_mode`. Each call drafts a new one, and the newest is what submit sends. Once evidence is submitted, this returns the summary that was sent and doesn't draft again.
+- **`summary`** is drafted by Claude from the packet and saved on the dispute: 3 to 6 plain sentences, 1500 characters at most. It sticks to what's in the packet, including facts that don't help the merchant. It's written for a PayPal reviewer, so it puts the packet's fields in plain English ("a risk rating of 100 out of 100", "Leash was in its normal review mode") and never uses a field name like `watch_mode`. Price caps read the way a person would say them: "up to $90" when the cap is inclusive, "under $90" when it isn't.
+- **Only the first look drafts.** After that, this returns the saved draft without calling Claude, so opening the page again never changes the text. The saved draft is exactly what submit sends. To get a new one, use `POST /disputes/{id}/redraft`. Once evidence is submitted, this returns the summary that was sent.
 - `502` if the summary couldn't be drafted, including when a draft still contains one of the packet's field names. Try again. `404` if there's no such dispute.
+
+### `POST /disputes/{id}/redraft`
+
+No body. Drafts a new summary on purpose and saves it in place of the old one. The response is the same shape as `GET /disputes/{id}/evidence`, with the new `summary`.
+
+| Status | When |
+|---|---|
+| `200` | New draft saved. Submit will send this one |
+| `409` | Evidence was already submitted, or a submit is in progress. The saved summary is left alone |
+| `502` | Claude couldn't draft one. The old draft is kept |
+| `404` | No such dispute |
 
 ### `POST /disputes/{id}/submit-evidence`
 
@@ -350,7 +364,7 @@ Before sending, it reads the dispute from PayPal and checks:
 | PayPal's status is `WAITING_FOR_SELLER_RESPONSE` **and** its details have a `provide-evidence` link | `409` with `detail.status` and `detail.provide_evidence_link`, so the page can say which. The row gets PayPal's latest status |
 | PayPal asked for an evidence type Leash can fill | `409` with `detail.requested_types` (see below) |
 
-The evidence type is the first one PayPal requested from the seller. If it requested nothing, it's `OTHER`, and the notes start with a sentence saying so. Leash never sends `PROOF_OF_FULFILLMENT`, `PROOF_OF_REFUND` or `PROOF_OF_RETURN`, because PayPal requires tracking or refund IDs for those and Leash has none. If those are all PayPal asked for, the merchant has to answer in PayPal's Resolution Center.
+The evidence type is the first one PayPal requested from the seller that Leash can fill. If it requested nothing, it's `OTHER`, and the notes start with a sentence saying so. Leash never sends `PROOF_OF_FULFILLMENT`, `PROOF_OF_REFUND` or `PROOF_OF_RETURN`, because PayPal requires tracking or refund IDs for those and Leash has none. If those are all PayPal asked for, the merchant has to answer in PayPal's Resolution Center.
 
 If PayPal rejects the evidence, the response is a `502` with the same `paypal_*` fields as the order endpoints, and nothing is marked as submitted, so it can be tried again.
 
