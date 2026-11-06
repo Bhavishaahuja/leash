@@ -11,11 +11,11 @@ There are four kinds of caller. Sending the wrong credential, or none, returns `
 | Caller | Sends | Can reach |
 |---|---|---|
 | Shopping agent | `X-API-Key: <AGENT_API_KEY>` | `POST /mandates`, `POST /orders`, `POST /orders/{id}/authorize`, `GET /agent/orders/{id}` |
-| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates/{id}`, `POST /orders/{id}/review-link` |
+| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `POST /orders/{id}/review-link`, `POST /demo/orders` |
 | Merchant scripts | `X-API-Key: <MERCHANT_API_KEY>` | The same as the dashboard |
 | Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject` |
 
-A credential only works on its own row. A dashboard session can't place orders, and the agent key can't read them.
+A credential only works on its own row. The agent key can't read orders, and a dashboard session can't call `POST /orders`. Its one way to place an order is `POST /demo/orders`, which only builds the four fixed demo scenarios.
 
 `GET /health` and `POST /auth/session` need nothing.
 
@@ -96,6 +96,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
   "capture_id": null,
   "void_result": null,
   "vault_id": "abc123",
+  "merchant": null,
   "items": [
     {
       "name": "Trail runner",
@@ -153,6 +154,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 - **Times** are ISO 8601 strings in UTC.
 - **`capture_id`** is set once money is taken. **`void_result`** is PayPal's status, normally `"VOIDED"`, once a hold is released. Both can be `null`.
 - **`shipping_amount`** is `null` on orders from before it was saved.
+- **`merchant`** is `null` for an order at Fernwood Supply Co, which is every agent order. Only `POST /demo/orders` sets it.
 - **`max_price`** can be in another currency, so don't hardcode `$`. Read `mandate.rules.currency`. If that's `null`, treat it as USD.
 - **`max_price_inclusive`**: `true` means "up to" and `false` means "under".
 - **`intent_check`** is `null` before the order is checked. It's also `null` if saving the result failed, and that order will be in `needs_review` with nothing to explain why, so handle a missing reason.
@@ -214,9 +216,13 @@ Calling this again makes a new token and kills the old one. That's how to recove
 
 `409` if the order isn't waiting for review, a payment is in progress, or the PayPal hold has expired. `404` if there's no such order.
 
+### `GET /mandates?limit=50`
+
+A list of mandates, newest first, in the same shape as `GET /mandates/{id}`. `limit` is capped at 200.
+
 ### `GET /mandates/{id}`
 
-The mandate, including `rules` and `max_price`.
+The mandate, including `rules` and `max_price`. `raw_request` is the shopper's own words. `rules` holds the parsed fields, including `item`, `color`, `size` and `quantity`, and `max_price`, `merchant` and `expires_at` are at the top level.
 
 ## Review endpoints
 
@@ -338,7 +344,33 @@ A network failure talking to PayPal is a `502` with a `message`, and the `paypal
 
 The same status object. This is how the agent finds out what a human decided.
 
-## Demo endpoint
+## Demo endpoints
+
+### `POST /demo/orders`
+
+Merchant only. Builds an order from a mandate's rules and runs it through the same path as `POST /orders`: a real sandbox hold, the intent check, then auto-decide. It can take around 30 seconds, so show a loading state.
+
+```json
+{ "mandate_id": 7, "scenario": "wrong_color" }
+```
+
+| `scenario` | What it builds | Refused when the mandate has |
+|---|---|---|
+| `clean` | Matching item and attributes, about 80% of the cap ($50.00 if there's no cap), same store | No item, or values that can't make a valid order |
+| `wrong_color` | The same, with a different color | No item, or no color |
+| `over_cap` | The same, about 15% over the cap | No item, or no cap |
+| `wrong_store` | The same, at a different fictional store | No item, or no store |
+
+Success is a `201` with the order object plus `decisions` and `approvals`, like `GET /orders/{id}`. The verdict, risk score and reason are in `intent_check`, which can be `null`. "Needs review" is `review_state`, not `status`: that order has `status: "authorized"` and `review_state: "needs_review"`.
+
+`clean` is only clean on a live USD mandate. An expired mandate or another currency still gets flagged, as it should.
+
+| Code | When |
+|---|---|
+| `404` | No such mandate |
+| `422` | Unknown scenario, or the mandate has nothing for the scenario to break. `detail` is a string safe to show unless the scenario itself was invalid |
+| `502` | PayPal failed, same as `POST /orders` |
+| `503` | `DEMO_VAULT_ID` isn't set on the API |
 
 ### `DELETE /demo/seeded`
 

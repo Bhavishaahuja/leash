@@ -37,7 +37,7 @@ def check_hard_rules(mandate, order, now=None):
 
     results = []
     results.append(check_price(mandate, order))
-    results.append(check_merchant(mandate))
+    results.append(check_merchant(mandate, order.merchant))
     results.append(check_expiry(mandate, now))
     results.append(check_currency(mandate, order))
     return results
@@ -81,24 +81,26 @@ def check_price(mandate, order):
     return RuleResult(RULE_PRICE, False, order_text + ", mandate cap is " + cap_text)
 
 
-def check_merchant(mandate):
+def check_merchant(mandate, order_merchant=None):
     wanted = normalize_merchant(mandate.merchant)
     if not wanted:
         return RuleResult(RULE_MERCHANT, True, "Mandate names no store")
 
-    # every order is at our one store, so the order itself has nothing to compare
-    accepted_names = [STORE_NAME]
-    for alias in STORE_ALIASES:
-        accepted_names.append(alias)
+    # no merchant on the order means our one store, which is every real agent order
+    order_store = order_merchant or STORE_NAME
+    accepted_names = [order_store]
+    if normalize_merchant(order_store) == normalize_merchant(STORE_NAME):
+        for alias in STORE_ALIASES:
+            accepted_names.append(alias)
 
     for name in accepted_names:
         if wanted == normalize_merchant(name):
-            return RuleResult(RULE_MERCHANT, True, "Mandate store matches " + STORE_NAME)
+            return RuleResult(RULE_MERCHANT, True, "Mandate store matches " + order_store)
 
     return RuleResult(
         RULE_MERCHANT,
         False,
-        "Mandate says " + mandate.merchant.strip() + ", order is at " + STORE_NAME,
+        "Mandate says " + mandate.merchant.strip() + ", order is at " + order_store,
     )
 
 

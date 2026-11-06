@@ -2,7 +2,16 @@
 // The mix covers every state the UI has to handle: clean auto-captures, orders
 // waiting on the human, a rejected order, and one still waiting for its check.
 
-import type { Approval, Decision, MandateSummary, OrderDetail, OrderItem, OrderStatus } from './types'
+import type {
+  Approval,
+  Decision,
+  DemoScenario,
+  MandateSummary,
+  OrderDetail,
+  OrderItem,
+  OrderStatus,
+  PlacedOrder,
+} from './types'
 
 // timestamps are relative to page load so the demo always looks recent
 function minutesAgo(minutes: number): string {
@@ -170,7 +179,7 @@ export const mockOrders: OrderDetail[] = [
     status: 'authorized',
     createdMinutesAgo: 18,
     decisions: [
-      decision(3, 'unsure', 48, 'Listed as an 80% wool blend, the mandate asked for nothing synthetic.', 'claude', 17),
+      decision(3, 'unsure', 48, 'Listed as an 80% wool blend, the mandate asked for nothing synthetic.', 'ai', 17),
     ],
   }),
   order({
@@ -204,3 +213,87 @@ export const mockOrders: OrderDetail[] = [
     decisions: [],
   }),
 ]
+
+// for /place-order. rules have the shape the real parser produces, since the page reads them.
+// the mug names no color, so its wrong color button has something to show being disabled
+export const mockMandates: MandateSummary[] = [
+  mandate(
+    21,
+    'Sam L.',
+    "Black trail runners, women's size 9, up to $120, from Fernwood Supply Co.",
+    '120.00',
+    { item: 'Trail runners', color: 'black', size: "women's 9", quantity: 1, currency: 'USD' },
+    90,
+  ),
+  mandate(
+    22,
+    'Riley P.',
+    'A navy rain jacket, size M, under $90, from Fernwood Supply Co.',
+    '90.00',
+    { item: 'Rain jacket', color: 'navy', size: 'M', quantity: 1, currency: 'USD' },
+    75,
+  ),
+  mandate(
+    23,
+    'Dana W.',
+    'One stainless steel camping mug, up to $40, from Fernwood Supply Co.',
+    '40.00',
+    { item: 'Stainless steel camping mug', color: null, size: null, quantity: 1, currency: 'USD' },
+    30,
+  ),
+]
+
+// what the backend's build_demo_order and the real check would come up with for each scenario
+export function mockPlacedOrder(id: number, source: MandateSummary, scenario: DemoScenario): PlacedOrder {
+  const cap = Number(source.max_price)
+  const rules = source.rules
+  const wantedColor = rules.color as string | null
+  const isClean = scenario === 'clean'
+  const total = (cap * (scenario === 'over_cap' ? 1.15 : 0.8)).toFixed(2)
+
+  let merchant = source.merchant
+  let color = wantedColor
+  let reason = 'Item, color and size all match the mandate.'
+  let riskScore = 5
+  let checkedBy: Decision['checked_by'] = 'ai'
+  if (scenario === 'wrong_color') {
+    color = 'red'
+    reason = 'Ordered red, mandate says ' + wantedColor
+    riskScore = 90
+  } else if (scenario === 'over_cap') {
+    reason = 'Order is $' + total + ', mandate cap is $' + source.max_price
+    riskScore = 100
+    checkedBy = 'rules'
+  } else if (scenario === 'wrong_store') {
+    merchant = 'Ridgeline Outdoors'
+    reason = 'Mandate says ' + source.merchant + ', order is at Ridgeline Outdoors'
+    riskScore = 100
+    checkedBy = 'rules'
+  }
+
+  const check = decision(id * 10, isClean ? 'match' : 'mismatch', riskScore, reason, checkedBy, 0)
+  const placed = order({
+    id,
+    mandate: source,
+    items: [
+      {
+        name: rules.item as string,
+        color,
+        size: rules.size as string | null,
+        quantity: 1,
+        unit_price: total,
+      },
+    ],
+    total,
+    status: isClean ? 'captured' : 'authorized',
+    createdMinutesAgo: 0,
+    decisions: [check],
+  })
+
+  return {
+    ...placed,
+    merchant,
+    review_state: isClean ? 'auto_approved' : 'needs_review',
+    intent_check: check,
+  }
+}

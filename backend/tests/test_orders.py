@@ -1311,8 +1311,9 @@ def test_every_order_response_has_the_same_shape(client, paypal):
 
     shared = {
         "id", "mandate_id", "paypal_order_id", "authorization_id", "capture_id", "void_result",
-        "vault_id", "items", "total", "shipping_amount", "currency", "status", "review_state",
-        "authorization_expires_at", "created_at", "mandate", "intent_check", "approval",
+        "vault_id", "merchant", "items", "total", "shipping_amount", "currency", "status",
+        "review_state", "authorization_expires_at", "created_at", "mandate", "intent_check",
+        "approval",
     }
     assert set(listed) == shared
     assert set(detail) == shared | {"decisions", "approvals"}
@@ -1464,9 +1465,9 @@ def test_every_route_in_the_app_needs_a_key():
         for method in operations:
             assert no_key.request(method, path).status_code == 401, method + " " + route_path
             checked += 1
-    # two for mandates, four for orders, one for review links, one for agent status, one for the
-    # demo reset. if this drops to 0 the loop above isn't checking anything, so it can't just pass
-    assert checked == 9
+    # three for mandates, four for orders, one for review links, one for agent status, two for the
+    # demo routes. if this drops to 0 the loop above isn't checking anything, so it can't just pass
+    assert checked == 11
 
 
 # ---- session tokens on the real routes ----

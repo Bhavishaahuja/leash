@@ -161,6 +161,8 @@ class OrderOut(BaseModel):
     capture_id: str | None
     void_result: str | None
     vault_id: str | None
+    # null means our own store. only a demo order names another one
+    merchant: str | None
     items: list
     total: Decimal
     shipping_amount: Decimal | None
@@ -574,24 +576,13 @@ def check_and_save(session, order, claude):
         logger.exception("Couldn't save the intent check for order %s", order.id)
 
 
-# ---- endpoints ----
-
-
-@router.post(
-    "",
-    response_model=OrderPlacedNeedsBuyer | AgentOrderStatus,
-    status_code=201,
-    dependencies=[Depends(require_agent)],
-)
-def create_order(body: OrderCreate, session: DbSession, paypal: PayPal, claude: Claude):
-    mandate = session.get(Mandate, body.mandate_id)
-    if mandate is None:
-        raise HTTPException(
-            status_code=404, detail="Mandate " + str(body.mandate_id) + " not found"
-        )
-
+def place_order(session, mandate, items, shipping, vault_id, paypal, claude, merchant=None):
+    # the whole path an order takes: save, hold at PayPal, check, auto-decide. POST /orders and
+    # POST /demo/orders both land here, so the demo can't drift from what an agent's order does.
+    # merchant stays None for a real agent order, those are always at our one store.
+    # returns (order, payer_action_url), and the url is None unless a buyer has to approve first
     items_json = []
-    for item in body.items:
+    for item in items:
         items_json.append({
             "name": item.name,
             "color": item.color,
@@ -606,16 +597,17 @@ def create_order(body: OrderCreate, session: DbSession, paypal: PayPal, claude: 
         items=items_json,
         total=Decimal("0"),
         # quantized so a defaulted "0" still reads back as 0.00
-        shipping_amount=body.shipping.quantize(CENT),
+        shipping_amount=shipping.quantize(CENT),
         currency=CURRENCY,
-        vault_id=body.vault_id,
+        vault_id=vault_id,
+        merchant=merchant,
         status=OrderStatus.created,
     )
     session.add(order)
     session.flush()
 
     paypal_body, total = build_paypal_order(
-        order.id, body.items, body.shipping, body.vault_id, get_settings()
+        order.id, items, shipping, vault_id, get_settings()
     )
     order.total = total
 
@@ -624,7 +616,7 @@ def create_order(body: OrderCreate, session: DbSession, paypal: PayPal, claude: 
         order.paypal_order_id = paypal_order.get("id")
 
         payer_action_url = None
-        if body.vault_id:
+        if vault_id:
             # spike 2: a vault_id order comes back COMPLETED with the authorization inside.
             # if this sandbox ever returns it un-authorized, authorize it ourselves
             authorization = first_authorization(paypal_order)
@@ -650,6 +642,29 @@ def create_order(body: OrderCreate, session: DbSession, paypal: PayPal, claude: 
 
     if order.status == OrderStatus.authorized:
         check_and_decide(session, order, paypal, claude)
+
+    return order, payer_action_url
+
+
+# ---- endpoints ----
+
+
+@router.post(
+    "",
+    response_model=OrderPlacedNeedsBuyer | AgentOrderStatus,
+    status_code=201,
+    dependencies=[Depends(require_agent)],
+)
+def create_order(body: OrderCreate, session: DbSession, paypal: PayPal, claude: Claude):
+    mandate = session.get(Mandate, body.mandate_id)
+    if mandate is None:
+        raise HTTPException(
+            status_code=404, detail="Mandate " + str(body.mandate_id) + " not found"
+        )
+
+    order, payer_action_url = place_order(
+        session, mandate, body.items, body.shipping, body.vault_id, paypal, claude
+    )
 
     # the agent doesn't get the reason or anything else from the check, or it could read why it was
     # flagged, adjust, and try again

@@ -107,6 +107,9 @@ class Order(Base):
     # disputes point at this (disputed_transactions[].seller_transaction_id), see spike 3
     capture_id: Mapped[str | None] = mapped_column(String(64), index=True)
     vault_id: Mapped[str | None] = mapped_column(String(64))
+    # the store the order is at. null means ours, which is every real agent order. only
+    # POST /demo/orders sets it, so the merchant rule has a wrong store to catch
+    merchant: Mapped[str | None] = mapped_column(String(200))
     items: Mapped[list] = mapped_column(JSON)
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     # the part of total that's shipping. null on orders saved before this column existed,

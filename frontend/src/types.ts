@@ -7,9 +7,14 @@ export type OrderStatus = 'created' | 'authorized' | 'captured' | 'voided' | 'fa
 
 export type Verdict = 'match' | 'mismatch' | 'unsure'
 
-export type CheckedBy = 'rules' | 'claude'
+export type CheckedBy = 'rules' | 'ai'
 
 export type ApprovalAction = 'approve' | 'reject'
+
+// who decided. status is where the money is, this is a separate field, see docs/api.md
+export type ReviewState = 'needs_review' | 'auto_approved' | 'approved' | 'rejected'
+
+export type DemoScenario = 'clean' | 'wrong_color' | 'over_cap' | 'wrong_store'
 
 export interface OrderItem {
   name: string
@@ -70,4 +75,13 @@ export interface OrderDetail extends Order {
   mandate: MandateSummary
   decisions: Decision[]
   approvals: Approval[]
+}
+
+// what POST /demo/orders sends back: the detail shape plus the fields the result card reads
+export interface PlacedOrder extends OrderDetail {
+  // null means Fernwood Supply Co
+  merchant: string | null
+  review_state: ReviewState | null
+  // null if the order never got a hold, or saving the check failed
+  intent_check: Decision | null
 }

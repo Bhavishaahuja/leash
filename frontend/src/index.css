@@ -352,9 +352,197 @@ p {
   font-size: 16px;
 }
 
+/* ---- place a demo order ---- */
+
+.place-order {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.place-order__stack {
+  display: grid;
+  gap: 16px;
+}
+
+.place-order__panel {
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  /* the select's long options can't push the panel wider than the screen */
+  min-width: 0;
+}
+
+.place-order__rules {
+  color: var(--ink-muted);
+  font-size: 14px;
+}
+
+.field-label {
+  font-weight: 600;
+}
+
+.field {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  /* 16px stops iOS zooming the page when a field gets focus */
+  font: inherit;
+  font-size: 16px;
+}
+
+.form-error {
+  color: var(--failed);
+}
+
+.primary-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: var(--primary-ink);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primary-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.scenario-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scenario-button {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  min-height: 96px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.scenario-button:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.scenario-button:focus-visible,
+.primary-button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.scenario-button:disabled {
+  background: var(--surface-sunk);
+  color: var(--ink-faint);
+  box-shadow: none;
+  cursor: default;
+}
+
+.scenario-button__title {
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.scenario-button__note {
+  font-size: 13px;
+  color: var(--ink-muted);
+}
+
+.scenario-button:disabled .scenario-button__note {
+  color: inherit;
+}
+
+.result-card {
+  gap: 12px;
+}
+
+.result-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.result-card__reason {
+  overflow-wrap: anywhere;
+}
+
+.result-card__facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.result-card__facts dt {
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.result-card__facts dd {
+  margin: 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-card__verdict {
+  text-transform: capitalize;
+}
+
+.result-card__items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 640px) {
   .topbar__store {
     display: none;
+  }
+
+  /* brand, two links and the sample data flag have to share 390px */
+  .topbar__inner {
+    padding: 0 12px;
+    gap: 8px;
+  }
+
+  .topbar__nav {
+    gap: 0;
+  }
+
+  .topbar__link {
+    padding: 6px 8px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .mock-flag {
+    white-space: nowrap;
+    padding: 3px 6px;
+    font-size: 11px;
   }
 
   .page {
