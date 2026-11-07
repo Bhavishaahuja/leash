@@ -68,6 +68,10 @@ function writeSessionToken(token: string | null) {
   }
 }
 
+// fired on window when a merchant call comes back 401: the session expired or was ended.
+// MerchantLayout listens and swaps the page for the login form
+export const SESSION_EXPIRED_EVENT = 'leash:session-expired'
+
 export function hasSession(): boolean {
   return USE_MOCKS || readSessionToken() !== null
 }
@@ -95,6 +99,7 @@ async function request<T>(path: string, init?: RequestInit, options: RequestOpti
     // dropping nothing is harmless there
     if (response.status === 401 && withSession) {
       writeSessionToken(null)
+      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
     }
 
     let detail: unknown = null
@@ -314,12 +319,23 @@ function placeMockDemoOrder(mandateId: number, scenario: DemoScenario): PlacedOr
 // ---- public API ----
 
 export async function logIn(password: string): Promise<void> {
-  const session = await request<{ session_token: string }>('/auth/session', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
-  })
+  // withSession false: a wrong password is a 401 too, and that isn't an expired session
+  const session = await request<{ session_token: string }>(
+    '/auth/session',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    },
+    { withSession: false },
+  )
   writeSessionToken(session.session_token)
+}
+
+// the backend has no logout route, the token just expires after 8 hours. forgetting it here is
+// enough for a shared demo laptop
+export function logOut(): void {
+  writeSessionToken(null)
 }
 
 export async function listMandates(limit = 50): Promise<MandateSummary[]> {

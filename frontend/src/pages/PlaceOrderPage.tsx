@@ -1,5 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
-import { ApiError, hasSession, listMandates, logIn, placeDemoOrder } from '../api'
+import { useState } from 'react'
+import { ApiError, listMandates, placeDemoOrder } from '../api'
 import { ReviewLinkBox } from '../components/ReviewLinkBox'
 import { StatusChip, type DisplayStatus } from '../components/StatusChip'
 import { SCENARIOS, scenarioBlocker } from '../lib/demoScenarios'
@@ -16,9 +16,10 @@ function isExpiredSession(error: unknown): boolean {
 
 // Demo stand-in for the shopping agent: pick a mandate, pick how the order should go wrong, and it
 // runs through the same hold, check and auto-decide as a real agent order.
+//
+// The login gate lives in MerchantLayout now, so this page can assume a session. If one runs out
+// mid-page, api.ts tells the layout and it swaps this page for the login form.
 export function PlaceOrderPage() {
-  const [loggedIn, setLoggedIn] = useState(hasSession)
-
   return (
     <section className="place-order">
       <div className="page__head">
@@ -28,68 +29,13 @@ export function PlaceOrderPage() {
         </div>
       </div>
 
-      {loggedIn ? (
-        <PlaceOrderForm onSessionExpired={() => setLoggedIn(false)} />
-      ) : (
-        <LoginForm onLoggedIn={() => setLoggedIn(true)} />
-      )}
+      <PlaceOrderForm />
     </section>
   )
 }
 
-function LoginForm({ onLoggedIn }: { onLoggedIn: () => void }) {
-  const [password, setPassword] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  async function submit(event: FormEvent) {
-    event.preventDefault()
-    setSubmitting(true)
-    setError(null)
-    try {
-      await logIn(password)
-      onLoggedIn()
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Login failed')
-      setSubmitting(false)
-    }
-  }
-
-  return (
-    <form className="card place-order__panel" onSubmit={submit}>
-      <label className="field-label" htmlFor="demo-password">
-        Merchant password
-      </label>
-      <input
-        id="demo-password"
-        className="field"
-        type="password"
-        autoComplete="current-password"
-        required
-        value={password}
-        onChange={(event) => setPassword(event.target.value)}
-      />
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
-      <button className="primary-button" type="submit" disabled={submitting}>
-        {submitting ? 'Logging in...' : 'Log in'}
-      </button>
-    </form>
-  )
-}
-
-function PlaceOrderForm({ onSessionExpired }: { onSessionExpired: () => void }) {
+function PlaceOrderForm() {
   const mandates = useAsync(loadMandates)
-
-  const loadError = mandates.status === 'error' ? mandates.error : null
-  useEffect(() => {
-    if (isExpiredSession(loadError)) {
-      onSessionExpired()
-    }
-  }, [loadError, onSessionExpired])
 
   if (mandates.status === 'loading') {
     return (
@@ -113,15 +59,14 @@ function PlaceOrderForm({ onSessionExpired }: { onSessionExpired: () => void }) 
     )
   }
 
-  return <ScenarioPicker mandates={mandates.data} onSessionExpired={onSessionExpired} />
+  return <ScenarioPicker mandates={mandates.data} />
 }
 
 interface ScenarioPickerProps {
   mandates: MandateSummary[]
-  onSessionExpired: () => void
 }
 
-function ScenarioPicker({ mandates, onSessionExpired }: ScenarioPickerProps) {
+function ScenarioPicker({ mandates }: ScenarioPickerProps) {
   const [mandateId, setMandateId] = useState(mandates[0].id)
   const [placing, setPlacing] = useState<DemoScenario | null>(null)
   const [result, setResult] = useState<PlacedOrder | null>(null)
@@ -144,7 +89,7 @@ function ScenarioPicker({ mandates, onSessionExpired }: ScenarioPickerProps) {
       setResult(await placeDemoOrder(mandate.id, scenario))
     } catch (caught) {
       if (isExpiredSession(caught)) {
-        onSessionExpired()
+        // the layout is already swapping to the login form, no point flashing an error first
         return
       }
       setError(caught instanceof Error ? caught.message : 'The order failed')
