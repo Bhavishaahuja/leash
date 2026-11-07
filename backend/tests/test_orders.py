@@ -613,9 +613,9 @@ def test_no_transaction_is_held_during_the_check(db_sessions, monkeypatch):
     seen = {}
     real_check = orders.run_intent_check
 
-    def spying_check(mandate, order, client=None):
+    def spying_check(mandate, order, client=None, sharp=False):
         seen["before"] = session.in_transaction()
-        result = real_check(mandate, order, client=client)
+        result = real_check(mandate, order, client=client, sharp=sharp)
         seen["after"] = session.in_transaction()
         return result
 
@@ -1311,8 +1311,9 @@ def test_every_order_response_has_the_same_shape(client, paypal):
 
     shared = {
         "id", "mandate_id", "paypal_order_id", "authorization_id", "capture_id", "void_result",
-        "vault_id", "items", "total", "shipping_amount", "currency", "status", "review_state",
-        "authorization_expires_at", "created_at", "mandate", "intent_check", "approval",
+        "vault_id", "merchant", "items", "total", "shipping_amount", "currency", "status",
+        "review_state", "authorization_expires_at", "watch_mode", "created_at", "mandate",
+        "intent_check", "approval",
     }
     assert set(listed) == shared
     assert set(detail) == shared | {"decisions", "approvals"}
@@ -1461,12 +1462,14 @@ def test_every_route_in_the_app_needs_a_key():
         if route_path in ("/health", "/auth/session") or route_path.startswith("/review/"):
             continue
         path = route_path.replace("{order_id}", "1").replace("{mandate_id}", "1")
+        path = path.replace("{dispute_id}", "1")
         for method in operations:
             assert no_key.request(method, path).status_code == 401, method + " " + route_path
             checked += 1
-    # two for mandates, four for orders, one for review links, one for agent status, one for the
-    # demo reset. if this drops to 0 the loop above isn't checking anything, so it can't just pass
-    assert checked == 9
+    # three for mandates, four for orders, one for review links, one for agent status, two for the
+    # demo routes, one for stats, five for disputes. if this drops to 0 the loop above isn't
+    # checking anything, so it can't just pass
+    assert checked == 17
 
 
 # ---- session tokens on the real routes ----

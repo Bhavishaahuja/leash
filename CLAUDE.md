@@ -50,5 +50,5 @@ check_setup.py    sanity check that PayPal + Anthropic keys work
 2. Conventional commit messages: `feat: add mandate endpoint`, `fix: void on reject`, `chore: bump deps`.
 3. Open a PR whose description includes `Closes #N`.
 4. CI must pass (ruff + pytest, plus the frontend build once it exists).
-5. The other teammate reviews and approves.
+5. PR + green CI required, self-merge allowed. A teammate review is welcome but not required.
 6. Squash and merge. Delete the branch.

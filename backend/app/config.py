@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     merchant_api_key: str = ""
     # the dashboard's login. left empty, login is off and the dashboard can't get a session
     demo_merchant_password: str = ""
+    # the saved sandbox wallet POST /demo/orders pays with, from spikes/.vault_token.json. without
+    # one PayPal waits on a buyer, so there's no hold and nothing to check. left empty, that's a 503
+    demo_vault_id: str = ""
 
     database_url: str = "postgresql+psycopg://postgres:postgres@localhost:5432/leash"
 

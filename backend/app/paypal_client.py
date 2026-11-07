@@ -5,12 +5,15 @@
 #   https://developer.paypal.com/api/orders/v2/schema.yaml    (v2.36)
 #   https://developer.paypal.com/api/payments/v2/schema.yaml
 #   token: https://developer.paypal.com/api/rest/authentication (access_token + expires_in)
+#   https://developer.paypal.com/api/customer-disputes/v1/schema.yaml   (v1.12, spike 3)
 #
 # Every POST gets a fresh PayPal-Request-Id unless the caller passes one in, so a caller
 # can store it and safely retry the exact same request.
 
+import json
 import time
 import uuid
+from urllib.parse import quote
 
 import requests
 
@@ -198,6 +201,50 @@ class PayPalClient:
     def get_capture(self, capture_id):
         # a captured authorization reads CAPTURED, the capture itself reads COMPLETED
         return self._get("/v2/payments/captures/" + capture_id)
+
+    # ---- Disputes v1 ----
+
+    def list_disputes(self, disputed_transaction_id):
+        # GET /v1/customer/disputes filtered to one transaction. the schema says this filter
+        # can't be combined with start_time. a summary per dispute: no disputed_transactions
+        # and no evidences, those take get_dispute. one capture has a handful at most, so one
+        # page of 50 is plenty
+        path = (
+            "/v1/customer/disputes?disputed_transaction_id="
+            + quote(disputed_transaction_id, safe="") + "&page_size=50"
+        )
+        return self._get(path)
+
+    def get_dispute(self, dispute_id):
+        # show dispute details: status, evidences[] (what PayPal wants from us) and the links
+        # that say what we're allowed to do right now
+        return self._get("/v1/customer/disputes/" + quote(dispute_id, safe=""))
+
+    def provide_evidence(self, dispute_id, evidence_input, file_name, file_bytes,
+                         file_type="application/pdf"):
+        # POST /v1/customer/disputes/{id}/provide-evidence, multipart/form-data only.
+        #   "input": the JSON, {"evidences": [...]} (usage guide, spike 3)
+        #   "evidence-file": the file (the schema's name for the part, sandbox took it on the
+        #   first try, PP-R-TUM-10196874)
+        # built from our base url rather than following the link's href, so the bearer token
+        # only ever goes to PayPal. a fresh PayPal-Request-Id like every other POST, the
+        # one-submit rule lives in disputes.py
+        headers = self._headers()
+        # requests writes the multipart Content-Type itself, it has to carry the boundary
+        del headers["Content-Type"]
+        headers["PayPal-Request-Id"] = str(uuid.uuid4())
+        parts = [
+            ("input", (None, json.dumps(evidence_input), "application/json")),
+            ("evidence-file", (file_name, file_bytes, file_type)),
+        ]
+        response = self.session.post(
+            self.base_url + "/v1/customer/disputes/" + quote(dispute_id, safe="")
+            + "/provide-evidence",
+            headers=headers,
+            files=parts,
+            timeout=self.timeout,
+        )
+        return self._handle(response)
 
 
 def client_from_settings(settings):

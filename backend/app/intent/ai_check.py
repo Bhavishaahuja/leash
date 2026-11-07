@@ -42,6 +42,8 @@ MAX_RISK_SCORE = 100
 # the prompt asks for under 90, this is the backstop for when it runs long
 MAX_REASON_LENGTH = 119
 TRIM_MARKER = "..."
+# with the rubber-stamp watch on, reasons have to be under 12 words. the prompt asks, this checks
+SHARP_MAX_WORDS = 11
 
 FAILED_RISK_SCORE = 50
 FAILED_REASON = "Couldn't verify automatically, please review"
@@ -73,15 +75,16 @@ class AICheckResult:
     mismatched_fields: list[str] = field(default_factory=list)
 
 
-def check_order_intent(client, mandate, order, clock=time.monotonic):
-    # clock is only passed in by tests, so they don't have to really wait 20 seconds
+def check_order_intent(client, mandate, order, clock=time.monotonic, sharp=False):
+    # clock is only passed in by tests, so they don't have to really wait 20 seconds.
+    # sharp is the rubber-stamp watch: same call, it just asks for a shorter, pointed reason
     started = clock()
 
     # the broad except is on purpose. a missing API key shows up as a TypeError from the SDK, not
     # an APIError, and no failure of any kind should stop an order reaching a human.
     # the log is what keeps a real bug from just looking like a lot of "unsure" orders
     try:
-        result = run_check(client, mandate, order, clock, started)
+        result = run_check(client, mandate, order, clock, started, sharp)
     except CheckOverBudget:
         logger.warning("AI check for order %s ran out of time, sending to review", order.id)
         return timed_out_result()
@@ -103,8 +106,8 @@ def timed_out_result():
     return AICheckResult(Verdict.unsure, FAILED_RISK_SCORE, TIMED_OUT_REASON, [])
 
 
-def run_check(client, mandate, order, clock, started):
-    user_message = intent_prompt.build_user_message(mandate, order)
+def run_check(client, mandate, order, clock, started, sharp=False):
+    user_message = intent_prompt.build_user_message(mandate, order, sharp=sharp)
 
     for attempt in range(MAX_ATTEMPTS):
         elapsed = clock() - started
@@ -121,7 +124,7 @@ def run_check(client, mandate, order, clock, started):
 
         tool_input = find_tool_input(response)
         if tool_input is not None:
-            return validate_output(tool_input)
+            return validate_output(tool_input, sharp)
         # no finished tool call this time, go around once more
 
     raise AICheckError("Claude didn't call the tool after " + str(MAX_ATTEMPTS) + " tries")
@@ -157,10 +160,12 @@ def find_tool_input(response):
 # ---- validating what came back ----
 
 
-def validate_output(tool_input):
+def validate_output(tool_input, sharp=False):
     verdict = clean_verdict(tool_input.get("verdict"))
     risk_score = clean_risk_score(tool_input.get("risk_score"))
     reason = clean_reason(tool_input.get("reason"))
+    if sharp:
+        reason = limit_words(reason, SHARP_MAX_WORDS)
     mismatched_fields = clean_mismatched_fields(tool_input.get("mismatched_fields"))
 
     # a match captures money, so it doesn't get the benefit of the doubt if it contradicts itself
@@ -219,6 +224,17 @@ def trim_at_word(text):
         trimmed = trimmed.rsplit(" ", 1)[0]
 
     return trimmed.rstrip(" ,;:.") + TRIM_MARKER
+
+
+def limit_words(text, max_words):
+    # a sharp reason that runs long still names the field up front, so keep the start of it
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    kept = []
+    for word in words[:max_words]:
+        kept.append(word)
+    return " ".join(kept).rstrip(" ,;:.") + TRIM_MARKER
 
 
 def clean_mismatched_fields(value):

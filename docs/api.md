@@ -11,11 +11,11 @@ There are four kinds of caller. Sending the wrong credential, or none, returns `
 | Caller | Sends | Can reach |
 |---|---|---|
 | Shopping agent | `X-API-Key: <AGENT_API_KEY>` | `POST /mandates`, `POST /orders`, `POST /orders/{id}/authorize`, `GET /agent/orders/{id}` |
-| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates/{id}`, `POST /orders/{id}/review-link` |
+| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `GET /stats`, `POST /orders/{id}/review-link`, `POST /demo/orders`, every `/disputes` route |
 | Merchant scripts | `X-API-Key: <MERCHANT_API_KEY>` | The same as the dashboard |
 | Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject` |
 
-A credential only works on its own row. A dashboard session can't place orders, and the agent key can't read them.
+A credential only works on its own row. The agent key can't read orders, and a dashboard session can't call `POST /orders`. Its one way to place an order is `POST /demo/orders`, which only builds the four fixed demo scenarios.
 
 `GET /health` and `POST /auth/session` need nothing.
 
@@ -96,6 +96,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
   "capture_id": null,
   "void_result": null,
   "vault_id": "abc123",
+  "merchant": null,
   "items": [
     {
       "name": "Trail runner",
@@ -111,6 +112,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
   "status": "authorized",
   "review_state": "needs_review",
   "authorization_expires_at": "2026-12-03T01:56:55Z",
+  "watch_mode": "normal",
   "created_at": "2026-11-05T15:04:05Z",
   "mandate": {
     "id": 7,
@@ -153,10 +155,12 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 - **Times** are ISO 8601 strings in UTC.
 - **`capture_id`** is set once money is taken. **`void_result`** is PayPal's status, normally `"VOIDED"`, once a hold is released. Both can be `null`.
 - **`shipping_amount`** is `null` on orders from before it was saved.
+- **`merchant`** is `null` for an order at Fernwood Supply Co, which is every agent order. Only `POST /demo/orders` sets it.
 - **`max_price`** can be in another currency, so don't hardcode `$`. Read `mandate.rules.currency`. If that's `null`, treat it as USD.
 - **`max_price_inclusive`**: `true` means "up to" and `false` means "under".
 - **`intent_check`** is `null` before the order is checked. It's also `null` if saving the result failed, and that order will be in `needs_review` with nothing to explain why, so handle a missing reason.
 - **`approval`** is `null` until the confirm page reports it rendered. It then exists with `action: null` until they decide. Auto-approved orders never have one.
+- **`watch_mode`** is `normal` or `sharp`: whether the rubber-stamp watch was on when the order was checked. Never `null`. Orders that were never checked are `normal`. Agents never see it. See [The rubber-stamp watch](#the-rubber-stamp-watch).
 
 ### `intent_check`
 
@@ -171,6 +175,8 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 | `checked_by` | `rules`, `ai` | Note: this used to be `claude` |
 
 `reason` can end in `(+2 more)` when several rules failed. The full list is in `rule_results`.
+
+In sharp mode, `reason` reads "Mandate said X, order has Y", under 12 words, with no `(+N more)`. An order the watch let through and captured has `reason` set to exactly `Let through: low risk while rubber-stamp watch was on`. Its `verdict` and `risk_score` are still what the check said.
 
 ### `approval`
 
@@ -214,9 +220,153 @@ Calling this again makes a new token and kills the old one. That's how to recove
 
 `409` if the order isn't waiting for review, a payment is in progress, or the PayPal hold has expired. `404` if there's no such order.
 
+### `GET /mandates?limit=50`
+
+A list of mandates, newest first, in the same shape as `GET /mandates/{id}`. `limit` is capped at 200.
+
 ### `GET /mandates/{id}`
 
-The mandate, including `rules` and `max_price`.
+The mandate, including `rules` and `max_price`. `raw_request` is the shopper's own words. `rules` holds the parsed fields, including `item`, `color`, `size` and `quantity`, and `max_price`, `merchant` and `expires_at` are at the top level.
+
+### `GET /stats`
+
+Counts for the dashboard, plus where the rubber-stamp watch stands.
+
+```json
+{
+  "total_orders": 42,
+  "auto_captured": 30,
+  "needs_review": 2,
+  "approved": 7,
+  "voided": 3,
+  "median_decision_ms": 1500,
+  "fast_streak": 3,
+  "rubber_stamp_active": true,
+  "fast_threshold_ms": 2000,
+  "recent_decision_ms": [300, 900, 1500, 8000, 4000]
+}
+```
+
+| Field | Notes |
+|---|---|
+| `auto_captured` | Orders Leash captured on its own (`review_state` is `auto_approved`) |
+| `needs_review` | Holds waiting on a human right now |
+| `approved` | A human tapped approve |
+| `voided` | Every order whose hold was released |
+| `median_decision_ms` | Over every human decision. `null` until there is one |
+| `fast_streak` | Fast approvals in a row, newest first |
+| `rubber_stamp_active` | `true` once `fast_streak` reaches 3. The next order is checked in sharp mode |
+| `fast_threshold_ms` | An approval under this counts as fast |
+| `recent_decision_ms` | The last 10 human decisions, newest first. An entry can be `null` on old rows |
+
+## The rubber-stamp watch
+
+A human who approves escalated orders without reading them isn't really reviewing anything. So when the last 3 human decisions were all approvals under 2 seconds (`decision_ms`, the server's number), the watch turns on. One reject or one slow approval turns it off.
+
+While it's on, orders are checked in sharp mode:
+
+- **Still always escalated:** any failed hard rule, any `mismatch`, and any check that couldn't run (Claude down or timed out).
+- **Otherwise escalated only if** `risk_score` is 60 or more. Below that, the order is captured and its `reason` says it was let through.
+- **Reasons are sharper:** "Mandate said black, order has olive", so the next look is a real one.
+
+The watch is global, not per shopper.
+
+## Disputes
+
+When a buyer disputes a captured order, Leash files its records with PayPal as evidence: what the buyer authorized, what was ordered, how it was checked, and who released the money. All five routes are merchant only.
+
+The usual flow is: sync, open the evidence (the first look drafts the summary), read it, redraft if it needs another go, then submit.
+
+### The dispute object
+
+```json
+{
+  "id": 3,
+  "paypal_dispute_id": "PP-R-ABC-10001234",
+  "order_id": 12,
+  "reason": "UNAUTHORISED",
+  "status": "WAITING_FOR_SELLER_RESPONSE",
+  "evidence_submitted": false,
+  "evidence_submitted_at": null,
+  "evidence_type": null,
+  "has_summary": true,
+  "seller_response_due_at": "2026-11-17T04:59:59Z",
+  "created_at": "2026-11-06T14:00:00Z"
+}
+```
+
+- **`reason`** and **`status`** are PayPal's own strings, stored as they come. Show them as is. `status` is as of the last sync or submit, so it can be behind PayPal.
+- **`has_summary`**: a summary has been drafted, so submit can go.
+- **`evidence_type`** is what was filed, like `OTHER`. `null` until then.
+- **`seller_response_due_at`**: PayPal's `seller_response_due_date`, as of the last sync. Miss it and PayPal closes the dispute in the buyer's favor, so it's the one to count down. `null` when PayPal isn't waiting on the merchant (under review, say), and sync clears it then.
+
+### `GET /disputes?limit=50`
+
+Dispute objects, newest first. `limit` is capped at 200.
+
+### `POST /disputes/sync`
+
+No body. For every captured order, asks PayPal for disputes on its capture ID, and saves or updates them. A dispute only counts if PayPal's details name that capture as the seller transaction. Success is a `200`:
+
+```json
+{ "orders_checked": 12, "disputes_found": 1, "created": 1, "updated": 0, "errors": [] }
+```
+
+A PayPal failure on one order doesn't stop the rest. It shows up in `errors` as `{"order_id": 4, "message": "..."}`. This makes PayPal calls per captured order, so it can take a few seconds.
+
+### `GET /disputes/{id}/evidence`
+
+The evidence packet plus a summary for the PayPal reviewer. Nothing is sent to PayPal.
+
+```json
+{
+  "dispute": { "...": "the dispute object" },
+  "packet": {
+    "dispute": { "paypal_dispute_id": "PP-R-ABC-10001234", "reason": "UNAUTHORISED", "status": "WAITING_FOR_SELLER_RESPONSE" },
+    "mandate": { "id": 7, "raw_request": "Black trail runners, women's size 9, up to $120, from Fernwood Supply Co.", "rules": { }, "max_price": "120.00", "max_price_inclusive": true, "merchant": "Fernwood Supply Co", "expires_at": null, "created_at": "..." },
+    "order": { "id": 12, "store": "Fernwood Supply Co", "items": [ ], "total": "98.00", "shipping_amount": "0.00", "currency": "USD", "status": "captured", "paypal_order_id": "...", "capture_id": "...", "created_at": "..." },
+    "intent_check": { "verdict": "match", "risk_score": 5, "reason": "Matches the mandate.", "mismatched_fields": [], "checked_by": "ai", "checked_at": "...", "watch_mode": "normal" },
+    "decision": { "released_by": "automatic capture", "review_state": "auto_approved", "action": "capture", "decision_ms": null, "decided_at": "..." }
+  },
+  "summary": "The buyer told their agent: ..."
+}
+```
+
+- **`decision`**: for a human approval, `released_by` is `human review`, with `decision_ms` (the server's own number), `opened_at` and `decided_at`. For an automatic capture, `decided_at` is the check's time, since the capture follows it straight away.
+- **`intent_check`** can be `null` if no check was saved.
+- The packet leaves out `buyer_label`.
+- **`summary`** is drafted by Claude from the packet and saved on the dispute: 3 to 6 plain sentences, 1500 characters at most. It sticks to what's in the packet, including facts that don't help the merchant. It's written for a PayPal reviewer, so it puts the packet's fields in plain English ("a risk rating of 100 out of 100", "Leash was in its normal review mode") and never uses a field name like `watch_mode`. Price caps read the way a person would say them: "up to $90" when the cap is inclusive, "under $90" when it isn't.
+- **Only the first look drafts.** After that, this returns the saved draft without calling Claude, so opening the page again never changes the text. The saved draft is exactly what submit sends. To get a new one, use `POST /disputes/{id}/redraft`. Once evidence is submitted, this returns the summary that was sent.
+- `502` if the summary couldn't be drafted, including when a draft still contains one of the packet's field names. Try again. `404` if there's no such dispute.
+
+### `POST /disputes/{id}/redraft`
+
+No body. Drafts a new summary on purpose and saves it in place of the old one. The response is the same shape as `GET /disputes/{id}/evidence`, with the new `summary`.
+
+| Status | When |
+|---|---|
+| `200` | New draft saved. Submit will send this one |
+| `409` | Evidence was already submitted, or a submit is in progress. The saved summary is left alone |
+| `502` | Claude couldn't draft one. The old draft is kept |
+| `404` | No such dispute |
+
+### `POST /disputes/{id}/submit-evidence`
+
+No body. Sends PayPal a PDF of the packet, with the saved summary as the notes. Success is a `200` with the dispute object, now with `evidence_submitted: true`.
+
+Before sending, it reads the dispute from PayPal and checks:
+
+| Check | If it fails |
+|---|---|
+| Evidence not already submitted | `409`, `detail.evidence_submitted_at` says when |
+| No other submit in progress | `409`. A submit that crashed frees up after 2 minutes |
+| A summary was drafted | `409`, open `GET /disputes/{id}/evidence` first |
+| PayPal's status is `WAITING_FOR_SELLER_RESPONSE` **and** its details have a `provide-evidence` link | `409` with `detail.status` and `detail.provide_evidence_link`, so the page can say which. The row gets PayPal's latest status |
+| PayPal asked for an evidence type Leash can fill | `409` with `detail.requested_types` (see below) |
+
+The evidence type is the first one PayPal requested from the seller that Leash can fill. If it requested nothing, it's `OTHER`, and the notes start with a sentence saying so. Leash never sends `PROOF_OF_FULFILLMENT`, `PROOF_OF_REFUND` or `PROOF_OF_RETURN`, because PayPal requires tracking or refund IDs for those and Leash has none. If those are all PayPal asked for, the merchant has to answer in PayPal's Resolution Center.
+
+If PayPal rejects the evidence, the response is a `502` with the same `paypal_*` fields as the order endpoints, and nothing is marked as submitted, so it can be tried again.
 
 ## Review endpoints
 
@@ -338,7 +488,33 @@ A network failure talking to PayPal is a `502` with a `message`, and the `paypal
 
 The same status object. This is how the agent finds out what a human decided.
 
-## Demo endpoint
+## Demo endpoints
+
+### `POST /demo/orders`
+
+Merchant only. Builds an order from a mandate's rules and runs it through the same path as `POST /orders`: a real sandbox hold, the intent check, then auto-decide. It can take around 30 seconds, so show a loading state.
+
+```json
+{ "mandate_id": 7, "scenario": "wrong_color" }
+```
+
+| `scenario` | What it builds | Refused when the mandate has |
+|---|---|---|
+| `clean` | Matching item and attributes, about 80% of the cap ($50.00 if there's no cap), same store | No item, or values that can't make a valid order |
+| `wrong_color` | The same, with a different color | No item, or no color |
+| `over_cap` | The same, about 15% over the cap | No item, or no cap |
+| `wrong_store` | The same, at a different fictional store | No item, or no store |
+
+Success is a `201` with the order object plus `decisions` and `approvals`, like `GET /orders/{id}`. The verdict, risk score and reason are in `intent_check`, which can be `null`. "Needs review" is `review_state`, not `status`: that order has `status: "authorized"` and `review_state: "needs_review"`.
+
+`clean` is only clean on a live USD mandate. An expired mandate or another currency still gets flagged, as it should.
+
+| Code | When |
+|---|---|
+| `404` | No such mandate |
+| `422` | Unknown scenario, or the mandate has nothing for the scenario to break. `detail` is a string safe to show unless the scenario itself was invalid |
+| `502` | PayPal failed, same as `POST /orders` |
+| `503` | `DEMO_VAULT_ID` isn't set on the API |
 
 ### `DELETE /demo/seeded`
 

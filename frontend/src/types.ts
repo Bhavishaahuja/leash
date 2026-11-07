@@ -16,6 +16,8 @@ export type CheckedBy = 'rules' | 'ai'
 
 export type ApprovalAction = 'approve' | 'reject'
 
+export type DemoScenario = 'clean' | 'wrong_color' | 'over_cap' | 'wrong_store'
+
 export interface OrderItem {
   name: string
   color: string | null
@@ -100,4 +102,13 @@ export interface OrderDetail extends Order {
   // full history, for GET /orders/{id}
   decisions: Decision[]
   approvals: Approval[]
+}
+
+// what POST /demo/orders sends back: the detail shape plus the fields the result card reads
+export interface PlacedOrder extends OrderDetail {
+  // null means Fernwood Supply Co
+  merchant: string | null
+  review_state: ReviewState | null
+  // null if the order never got a hold, or saving the check failed
+  intent_check: Decision | null
 }

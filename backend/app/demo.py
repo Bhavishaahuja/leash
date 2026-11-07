@@ -1,18 +1,196 @@
-# Support for backend/scripts/seed_demo.py, which has to work against Render with only a base URL.
-# Seeded rows are the ones whose mandate has a buyer_label starting with SEED_LABEL_PREFIX.
+# Demo support. Two separate things live here:
+#   POST /demo/orders builds an order from a mandate's rules, right or wrong on purpose, and sends
+#   it down the same path as an agent's order. It's what the /place-order page calls.
+#   DELETE /demo/seeded supports backend/scripts/seed_demo.py, which has to work against Render with
+#   only a base URL. Seeded rows are the ones whose mandate has a buyer_label starting with
+#   SEED_LABEL_PREFIX.
+
+import enum
+from dataclasses import dataclass
+from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ValidationError
 from sqlalchemy import delete, select
 
 from backend.app.auth import require_merchant
+from backend.app.config import STORE_NAME, get_settings
+from backend.app.intent.rules import normalize_merchant
 from backend.app.models import Approval, Decision, Mandate, Order, OrderStatus
-from backend.app.orders import DbSession
+from backend.app.orders import (
+    CENT,
+    Claude,
+    DbSession,
+    OrderDetail,
+    OrderItemIn,
+    PayPal,
+    load_order,
+    place_order,
+)
 from backend.app.review import hold_has_expired
 
 # the part after the colon names the scenario, which is how a re-run finds what's already there
 SEED_LABEL_PREFIX = "seed-demo:"
 
+CLEAN_SHARE_OF_CAP = Decimal("0.80")
+OVER_CAP_SHARE_OF_CAP = Decimal("1.15")
+# a fixed, ordinary price for a mandate with no cap, where 80% of it means nothing. the shopper set
+# no limit, so any price passes the rule and this number doesn't affect the verdict
+PRICE_WITHOUT_CAP = Decimal("50.00")
+# shipping stays out of it, so the percentages above are exactly what the price rule compares
+DEMO_SHIPPING = Decimal("0.00")
+
+# the other store from the seed data, for the wrong_store scenario
+OTHER_STORE_NAME = "Ridgeline Outdoors"
+# first one that doesn't appear in the mandate's color wins
+WRONG_COLORS = ["red", "green", "orange"]
+
 router = APIRouter(prefix="/demo", tags=["demo"])
+
+
+class DemoScenario(str, enum.Enum):
+    clean = "clean"
+    wrong_color = "wrong_color"
+    over_cap = "over_cap"
+    wrong_store = "wrong_store"
+
+
+class DemoOrderCreate(BaseModel):
+    mandate_id: int
+    scenario: DemoScenario
+
+
+@dataclass(frozen=True)
+class DemoOrder:
+    items: list[OrderItemIn]
+    shipping: Decimal
+    merchant: str | None
+
+
+class ScenarioNotPossible(Exception):
+    # this mandate has nothing for the scenario to break. a "wrong color" on a mandate that names
+    # no color is a perfectly fine order, and it would auto-capture while pretending to be a test
+    pass
+
+
+def build_demo_order(mandate, scenario):
+    # no database and no PayPal in here, just the mandate's rules turned into an order. each
+    # scenario starts from the same matching order and breaks exactly one thing
+    rules = mandate.rules
+    # checked first, every scenario needs it. a placeholder name can't be checked against anything,
+    # so Claude says unsure and even a clean order can never auto-capture
+    item_name = product_name(rules.get("item"))
+    if item_name is None:
+        raise ScenarioNotPossible("This mandate doesn't name an item to order")
+
+    color = rules.get("color")
+    # same fallback as the parser: a shopper who didn't say how many wants one
+    quantity = rules.get("quantity") or 1
+    merchant = mandate.merchant
+    target_total = clean_total(mandate)
+    rounding = ROUND_DOWN
+
+    if scenario == DemoScenario.wrong_color:
+        if not color:
+            raise ScenarioNotPossible("This mandate doesn't name a color to get wrong")
+        color = different_color(color)
+    elif scenario == DemoScenario.over_cap:
+        if mandate.max_price is None:
+            raise ScenarioNotPossible("This mandate has no price cap to go over")
+        target_total = Decimal(str(mandate.max_price)) * OVER_CAP_SHARE_OF_CAP
+        # up, so a small cap split across several units still lands over it
+        rounding = ROUND_UP
+    elif scenario == DemoScenario.wrong_store:
+        if not merchant:
+            raise ScenarioNotPossible("This mandate doesn't name a store, so any store is fine")
+        merchant = different_store(merchant)
+
+    unit_price = (target_total / quantity).quantize(CENT, rounding=rounding)
+    try:
+        # name, color and size stay separate fields, like an agent's order. item_display_name in
+        # orders.py and describeItem in the frontend join them into "Trail runners, blue, size 8",
+        # so putting the color in the name as well would print it twice
+        item = OrderItemIn(
+            name=item_name,
+            color=color,
+            size=rules.get("size"),
+            quantity=quantity,
+            unit_price=unit_price,
+        )
+    except ValidationError as error:
+        # a cap of one cent, or a quantity or price past what POST /orders accepts
+        raise ScenarioNotPossible("This mandate's values can't make a valid order") from error
+
+    return DemoOrder(items=[item], shipping=DEMO_SHIPPING, merchant=merchant)
+
+
+def product_name(item):
+    # "trail runners" from the parser reads as "Trail runners" on a product line. None if blank
+    if not item or not item.strip():
+        return None
+    name = item.strip()
+    return name[0].upper() + name[1:]
+
+
+def clean_total(mandate):
+    if mandate.max_price is None:
+        return PRICE_WITHOUT_CAP
+    return Decimal(str(mandate.max_price)) * CLEAN_SHARE_OF_CAP
+
+
+def different_color(color):
+    wanted = color.casefold()
+    for candidate in WRONG_COLORS:
+        if candidate not in wanted:
+            return candidate
+    # a mandate would have to name all of them for this to run
+    return "purple"
+
+
+def different_store(merchant):
+    if normalize_merchant(merchant) == normalize_merchant(OTHER_STORE_NAME):
+        return STORE_NAME
+    return OTHER_STORE_NAME
+
+
+@router.post(
+    "/orders",
+    response_model=OrderDetail,
+    status_code=201,
+    dependencies=[Depends(require_merchant)],
+)
+def create_demo_order(body: DemoOrderCreate, session: DbSession, paypal: PayPal, claude: Claude):
+    # checked first so a missing setting can't leave half an order behind
+    vault_id = get_settings().demo_vault_id
+    if not vault_id:
+        raise HTTPException(status_code=503, detail="DEMO_VAULT_ID isn't set on the API")
+
+    mandate = session.get(Mandate, body.mandate_id)
+    if mandate is None:
+        raise HTTPException(
+            status_code=404, detail="Mandate " + str(body.mandate_id) + " not found"
+        )
+
+    try:
+        demo_order = build_demo_order(mandate, body.scenario)
+    except ScenarioNotPossible as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    order, _ = place_order(
+        session,
+        mandate,
+        demo_order.items,
+        demo_order.shipping,
+        vault_id,
+        paypal,
+        claude,
+        merchant=demo_order.merchant,
+    )
+
+    # read it back, so this shows what got saved and not what the session remembers
+    order_id = order.id
+    session.expire_all()
+    return load_order(session, order_id)
 
 
 @router.delete("/seeded", dependencies=[Depends(require_merchant)])

@@ -28,6 +28,9 @@ class RuleResult:
     passed: bool
     # one line for the human, like "Order is $142.00, mandate cap is $120.00"
     reason: str
+    # only on a failure: the same thing as "Mandate said X, order has Y", for when the
+    # rubber-stamp watch is on. never saved to rule_results, it becomes the order's reason
+    sharp_reason: str | None = None
 
 
 def check_hard_rules(mandate, order, now=None):
@@ -37,7 +40,7 @@ def check_hard_rules(mandate, order, now=None):
 
     results = []
     results.append(check_price(mandate, order))
-    results.append(check_merchant(mandate))
+    results.append(check_merchant(mandate, order.merchant))
     results.append(check_expiry(mandate, now))
     results.append(check_currency(mandate, order))
     return results
@@ -70,35 +73,50 @@ def check_price(mandate, order):
     cap_text = format_money(cap, order_currency)
     order_text = describe_order_total(order, total, order_currency)
 
+    total_text = format_money(total, order_currency)
+
     # only an explicit False means "under $X". the column default is True
     if mandate.max_price_inclusive is False:
         if total < cap:
             return RuleResult(RULE_PRICE, True, order_text + ", under the " + cap_text + " cap")
-        return RuleResult(RULE_PRICE, False, order_text + ", mandate requires under " + cap_text)
+        return RuleResult(
+            RULE_PRICE,
+            False,
+            order_text + ", mandate requires under " + cap_text,
+            sharp_reason="Mandate said under " + cap_text + ", order has " + total_text,
+        )
 
     if total <= cap:
         return RuleResult(RULE_PRICE, True, order_text + ", within the " + cap_text + " cap")
-    return RuleResult(RULE_PRICE, False, order_text + ", mandate cap is " + cap_text)
+    return RuleResult(
+        RULE_PRICE,
+        False,
+        order_text + ", mandate cap is " + cap_text,
+        sharp_reason="Mandate said max " + cap_text + ", order has " + total_text,
+    )
 
 
-def check_merchant(mandate):
+def check_merchant(mandate, order_merchant=None):
     wanted = normalize_merchant(mandate.merchant)
     if not wanted:
         return RuleResult(RULE_MERCHANT, True, "Mandate names no store")
 
-    # every order is at our one store, so the order itself has nothing to compare
-    accepted_names = [STORE_NAME]
-    for alias in STORE_ALIASES:
-        accepted_names.append(alias)
+    # no merchant on the order means our one store, which is every real agent order
+    order_store = order_merchant or STORE_NAME
+    accepted_names = [order_store]
+    if normalize_merchant(order_store) == normalize_merchant(STORE_NAME):
+        for alias in STORE_ALIASES:
+            accepted_names.append(alias)
 
     for name in accepted_names:
         if wanted == normalize_merchant(name):
-            return RuleResult(RULE_MERCHANT, True, "Mandate store matches " + STORE_NAME)
+            return RuleResult(RULE_MERCHANT, True, "Mandate store matches " + order_store)
 
     return RuleResult(
         RULE_MERCHANT,
         False,
-        "Mandate says " + mandate.merchant.strip() + ", order is at " + STORE_NAME,
+        "Mandate says " + mandate.merchant.strip() + ", order is at " + order_store,
+        sharp_reason="Mandate said " + mandate.merchant.strip() + ", order has " + order_store,
     )
 
 
@@ -111,7 +129,14 @@ def check_expiry(mandate, now):
 
     # still good at the exact expiry moment, it's only expired once that has gone by
     if as_utc(now) > expires_at:
-        return RuleResult(RULE_EXPIRY, False, "Mandate expired " + expires_text)
+        return RuleResult(
+            RULE_EXPIRY,
+            False,
+            "Mandate expired " + expires_text,
+            # dates only, the times would push it past the word limit
+            sharp_reason="Mandate said until " + expires_at.strftime("%Y-%m-%d")
+            + ", order has " + as_utc(now).strftime("%Y-%m-%d"),
+        )
     return RuleResult(RULE_EXPIRY, True, "Mandate is valid until " + expires_text)
 
 
@@ -123,7 +148,10 @@ def check_currency(mandate, order):
         return RuleResult(RULE_CURRENCY, True, "Mandate names no currency")
     if wanted != order_currency:
         return RuleResult(
-            RULE_CURRENCY, False, "Mandate is in " + wanted + ", order is in " + order_currency
+            RULE_CURRENCY,
+            False,
+            "Mandate is in " + wanted + ", order is in " + order_currency,
+            sharp_reason="Mandate said " + wanted + ", order has " + order_currency,
         )
     return RuleResult(RULE_CURRENCY, True, "Both are in " + order_currency)
 

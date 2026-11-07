@@ -18,6 +18,9 @@ export function MerchantLayout() {
             <NavLink to="/dashboard" className="topbar__link">
               Orders
             </NavLink>
+            <NavLink to="/place-order" className="topbar__link">
+              Place order
+            </NavLink>
           </nav>
           {USE_MOCKS && <span className="mock-flag">Sample data</span>}
         </div>

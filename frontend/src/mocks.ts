@@ -8,10 +8,12 @@ import type {
   Approval,
   ApprovalAction,
   Decision,
+  DemoScenario,
   MandateSummary,
   OrderDetail,
   OrderItem,
   OrderStatus,
+  PlacedOrder,
   ReviewState,
   RuleResult,
 } from './types'
@@ -47,7 +49,7 @@ function mandate(
 }
 
 // the four hard rules, all passing unless one is overridden
-function rules(overrides: Partial<Record<string, string | false>> = {}): RuleResult[] {
+function hardRules(overrides: Partial<Record<string, string | false>> = {}): RuleResult[] {
   const defaults: Record<string, string> = {
     price: 'Order is within the price cap',
     merchant: 'Mandate store matches Fernwood Supply Co',
@@ -86,7 +88,7 @@ function decision(input: DecisionInput): Decision {
     risk_score: input.riskScore,
     reason: input.reason,
     mismatched_fields: input.mismatchedFields ?? [],
-    rule_results: input.ruleResults ?? rules(),
+    rule_results: input.ruleResults ?? hardRules(),
     latency_ms: input.latencyMs,
     checked_by: input.checkedBy,
     created_at: minutesAgo(input.createdMinutesAgo),
@@ -317,7 +319,7 @@ export const mockOrders: OrderDetail[] = [
       reason: 'Order is $74.50, over the $60.00 cap',
       checkedBy: 'rules',
       mismatchedFields: ['price'],
-      ruleResults: rules({ price: 'Order is $74.50 ($68.50 item + $6.00 shipping), over the $60.00 cap' }),
+      ruleResults: hardRules({ price: 'Order is $74.50 ($68.50 item + $6.00 shipping), over the $60.00 cap' }),
       latencyMs: 12,
       createdMinutesAgo: 140,
     }),
@@ -411,3 +413,112 @@ export const mockOrders: OrderDetail[] = [
     check: null,
   }),
 ]
+
+// for /place-order. rules have the shape the real parser produces, since the page reads them.
+// the mug names no color, so its wrong color button has something to show being disabled
+export const mockMandates: MandateSummary[] = [
+  mandate(
+    21,
+    'Sam L.',
+    "Black trail runners, women's size 9, up to $120, from Fernwood Supply Co.",
+    '120.00',
+    { item: 'Trail runners', color: 'black', size: "women's 9", quantity: 1, currency: 'USD' },
+    90,
+  ),
+  mandate(
+    22,
+    'Riley P.',
+    'A navy rain jacket, size M, under $90, from Fernwood Supply Co.',
+    '90.00',
+    { item: 'Rain jacket', color: 'navy', size: 'M', quantity: 1, currency: 'USD' },
+    75,
+  ),
+  mandate(
+    23,
+    'Dana W.',
+    'One stainless steel camping mug, up to $40, from Fernwood Supply Co.',
+    '40.00',
+    { item: 'Stainless steel camping mug', color: null, size: null, quantity: 1, currency: 'USD' },
+    30,
+  ),
+]
+
+// what the backend's build_demo_order and the real check would come up with for each scenario
+export function mockPlacedOrder(id: number, source: MandateSummary, scenario: DemoScenario): PlacedOrder {
+  const cap = Number(source.max_price)
+  const rules = source.rules
+  const wantedColor = rules.color as string | null
+  const isClean = scenario === 'clean'
+  const total = (cap * (scenario === 'over_cap' ? 1.15 : 0.8)).toFixed(2)
+
+  let merchant = source.merchant
+  let color = wantedColor
+  let reason = 'Item, color and size all match the mandate.'
+  let riskScore = 5
+  let checkedBy: Decision['checked_by'] = 'ai'
+  if (scenario === 'wrong_color') {
+    color = 'red'
+    reason = 'Ordered red, mandate says ' + wantedColor
+    riskScore = 90
+  } else if (scenario === 'over_cap') {
+    reason = 'Order is $' + total + ', mandate cap is $' + source.max_price
+    riskScore = 100
+    checkedBy = 'rules'
+  } else if (scenario === 'wrong_store') {
+    merchant = 'Ridgeline Outdoors'
+    reason = 'Mandate says ' + source.merchant + ', order is at Ridgeline Outdoors'
+    riskScore = 100
+    checkedBy = 'rules'
+  }
+
+  // which field the check would name, so the dashboard panel highlights the right row
+  const mismatchedFields: string[] = []
+  let ruleResults: RuleResult[] = hardRules()
+  if (scenario === 'wrong_color') {
+    mismatchedFields.push('color')
+  } else if (scenario === 'over_cap') {
+    mismatchedFields.push('price')
+    ruleResults = hardRules({ price: reason })
+  } else if (scenario === 'wrong_store') {
+    mismatchedFields.push('merchant')
+    ruleResults = hardRules({ merchant: reason })
+  }
+
+  const check = decision({
+    id: id * 10,
+    verdict: isClean ? 'match' : 'mismatch',
+    riskScore,
+    reason,
+    checkedBy,
+    mismatchedFields,
+    ruleResults,
+    latencyMs: checkedBy === 'rules' ? 15 : 1900,
+    createdMinutesAgo: 0,
+  })
+  const placed = order({
+    id,
+    mandate: source,
+    items: [
+      {
+        name: rules.item as string,
+        color,
+        size: rules.size as string | null,
+        quantity: 1,
+        unit_price: total,
+      },
+    ],
+    shipping: '0.00',
+    total,
+    status: isClean ? 'captured' : 'authorized',
+    reviewState: isClean ? 'auto_approved' : 'needs_review',
+    createdMinutesAgo: 0,
+    check,
+  })
+
+  return {
+    ...placed,
+    merchant,
+    review_state: isClean ? 'auto_approved' : 'needs_review',
+    intent_check: check,
+  }
+}

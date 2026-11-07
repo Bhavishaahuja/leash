@@ -1,4 +1,4 @@
-# the four tables Leash needs for week 1. field choices follow spikes/README.md
+# the tables Leash needs. field choices follow spikes/README.md (disputes: spike 3)
 
 import enum
 from datetime import datetime
@@ -55,6 +55,13 @@ class ReviewState(str, enum.Enum):
     rejected = "rejected"
 
 
+class WatchMode(str, enum.Enum):
+    # which mode the rubber-stamp watch was in when this order got checked, see rubber_stamp.py
+    normal = "normal"
+    # the human had been approving too fast: fewer escalations, sharper reasons
+    sharp = "sharp"
+
+
 def string_enum(enum_class, name):
     # store enums as plain strings with a CHECK constraint instead of a Postgres enum
     # type, so adding a value later is a simple migration
@@ -107,6 +114,9 @@ class Order(Base):
     # disputes point at this (disputed_transactions[].seller_transaction_id), see spike 3
     capture_id: Mapped[str | None] = mapped_column(String(64), index=True)
     vault_id: Mapped[str | None] = mapped_column(String(64))
+    # the store the order is at. null means ours, which is every real agent order. only
+    # POST /demo/orders sets it, so the merchant rule has a wrong store to catch
+    merchant: Mapped[str | None] = mapped_column(String(200))
     items: Mapped[list] = mapped_column(JSON)
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     # the part of total that's shipping. null on orders saved before this column existed,
@@ -132,6 +142,14 @@ class Order(Base):
     review_token_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # PayPal authorizations last 29 days (spike 2), the human has to decide before this
     authorization_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # set when the order gets checked. orders that never got that far (no hold yet, or PayPal
+    # failed) were never judged in sharp mode, so normal is true for them too
+    watch_mode: Mapped[WatchMode] = mapped_column(
+        string_enum(WatchMode, "watch_mode"),
+        default=WatchMode.normal,
+        server_default=WatchMode.normal.value,
+        nullable=False,
+    )
     created_at: Mapped[datetime] = created_at_column()
 
     mandate: Mapped[Mandate] = relationship(back_populates="orders")
@@ -183,6 +201,16 @@ class Decision(Base):
 
     order: Mapped[Order] = relationship(back_populates="decisions")
 
+    @property
+    def hard_rule_failed(self):
+        # any of the deterministic rules said no. null on rows saved before rule_results existed
+        if not self.rule_results:
+            return False
+        for result in self.rule_results:
+            if not result.get("passed"):
+                return True
+        return False
+
 
 class Approval(Base):
     # the human looking at a flagged order. timing feeds the rubber-stamp watch
@@ -206,3 +234,33 @@ class Approval(Base):
     client_decision_ms: Mapped[int | None] = mapped_column(Integer)
 
     order: Mapped[Order] = relationship(back_populates="approvals")
+
+
+class Dispute(Base):
+    # a PayPal dispute on one of our captured orders, and the evidence Leash filed for it.
+    # reason and status are PayPal's own strings (UNAUTHORISED, WAITING_FOR_SELLER_RESPONSE...),
+    # kept as plain text since PayPal can add values without telling us
+    __tablename__ = "disputes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # like PP-R-ABC-10001234. unique, so a second sync updates the row instead of copying it
+    paypal_dispute_id: Mapped[str] = mapped_column(String(64), unique=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    reason: Mapped[str | None] = mapped_column(String(100))
+    status: Mapped[str | None] = mapped_column(String(64))
+    # the summary Claude drafted for the PayPal reviewer. the merchant reads it on GET .../evidence
+    # and that exact text is what submit sends as the notes
+    evidence_summary: Mapped[str | None] = mapped_column(Text)
+    # what we filed as, e.g. OTHER. null until submitted
+    evidence_type: Mapped[str | None] = mapped_column(String(64))
+    # set while a submit is on its way to PayPal, so a second one can't go too. same idea as
+    # Order.payment_claimed_at
+    evidence_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # PayPal took the evidence. once set, submit refuses
+    evidence_submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # PayPal's seller_response_due_date: miss it and the dispute closes in the buyer's favor.
+    # null when PayPal isn't waiting on us (e.g. while it's under review)
+    seller_response_due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = created_at_column()
+
+    order: Mapped[Order] = relationship()

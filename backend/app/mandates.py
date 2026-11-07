@@ -1,4 +1,4 @@
-# POST /mandates and GET /mandates/{id}
+# POST /mandates, GET /mandates and GET /mandates/{id}
 
 from datetime import datetime
 from decimal import Decimal
@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app import mandate_parser
@@ -70,6 +71,13 @@ def create_mandate(body: MandateCreate, session: DbSession, client: AnthropicCli
     session.commit()
     session.refresh(mandate)
     return mandate
+
+
+@router.get("", response_model=list[MandateOut], dependencies=[Depends(require_merchant)])
+def list_mandates(session: DbSession, limit: int = 50):
+    limit = max(1, min(limit, 200))
+    query = select(Mandate).order_by(Mandate.created_at.desc(), Mandate.id.desc()).limit(limit)
+    return session.scalars(query).all()
 
 
 @router.get(
