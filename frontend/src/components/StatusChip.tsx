@@ -4,8 +4,9 @@ import type { OrderStatus } from '../types'
 export type DisplayStatus = OrderStatus | 'needs_review'
 
 const LABELS: Record<DisplayStatus, string> = {
-  created: 'Created',
-  authorized: 'Authorized',
+  // created means the buyer still has to approve at PayPal before there's a hold
+  created: 'Waiting on buyer',
+  authorized: 'On hold',
   captured: 'Captured',
   voided: 'Voided',
   failed: 'Failed',

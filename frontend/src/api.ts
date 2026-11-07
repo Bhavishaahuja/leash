@@ -71,9 +71,8 @@ function findMockOrder(orderId: number): OrderDetail {
 }
 
 function stripDetail(order: OrderDetail): Order {
-  // the list and capture/void endpoints return OrderOut, which has no mandate/decisions/approvals
-  const { mandate, decisions, approvals, ...plain } = order
-  void mandate
+  // GET /orders returns OrderOut: mandate, intent_check and approval inline, but no full history
+  const { decisions, approvals, ...plain } = order
   void decisions
   void approvals
   return plain
@@ -89,6 +88,10 @@ function settleMockOrder(orderId: number, nextStatus: 'captured' | 'voided'): Or
   order.status = nextStatus
   if (nextStatus === 'captured') {
     order.capture_id = 'MOCKCAP' + orderId
+    order.review_state = 'approved'
+  } else {
+    order.void_result = 'VOIDED'
+    order.review_state = 'rejected'
   }
   order.authorization_expires_at = null
   return stripDetail(order)

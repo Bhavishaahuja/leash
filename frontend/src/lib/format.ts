@@ -50,3 +50,24 @@ export function summarizeItems(items: OrderItem[]): string {
   }
   return label + ' + ' + (items.length - 1) + ' more'
 }
+
+export function formatDuration(ms: number): string {
+  // "12ms" for the hard rules, "1.2s" for quick taps, "1m 05s" once seconds get hard to read
+  if (ms < 1000) {
+    return ms + 'ms'
+  }
+  if (ms < 60_000) {
+    return (ms / 1000).toFixed(1) + 's'
+  }
+  const totalSeconds = Math.round(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return minutes + 'm ' + String(seconds).padStart(2, '0') + 's'
+}
+
+export function formatDateTime(iso: string | null): string {
+  if (!iso) {
+    return 'Not yet'
+  }
+  return formatTime(iso)
+}

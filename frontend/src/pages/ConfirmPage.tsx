@@ -44,7 +44,7 @@ function ConfirmOrder({ orderId }: { orderId: number }) {
   }
 
   const detail = order.data
-  const latestDecision = detail.decisions.at(-1)
+  const latestDecision = detail.intent_check
 
   return (
     <ConfirmFrame>
