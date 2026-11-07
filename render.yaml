@@ -1,4 +1,4 @@
-# Render Blueprint for the Leash API. Spec: https://render.com/docs/blueprint-spec
+# Render Blueprint for the Leash API and frontend. Spec: https://render.com/docs/blueprint-spec
 #
 # The Postgres database (leash-db, Oregon, free) already exists and isn't declared here.
 # Its URL goes in DATABASE_URL by hand (use the Internal Database URL, same region).
@@ -41,3 +41,29 @@ services:
         sync: false
       - key: PAYPAL_BASE_URL
         value: https://api-m.sandbox.paypal.com
+
+  # the dashboard and confirm page. a static site lives on Render's global CDN, so it takes no
+  # region or plan (both are unsupported for static sites)
+  - type: web
+    name: leash-frontend
+    runtime: static
+    branch: main
+    autoDeployTrigger: commit
+    # build command and publish path both run from here, not the repo root
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    # Vite bakes these into the bundle at build time, so changing one needs a rebuild, not just
+    # a redeploy. neither is a secret, they end up in the public JS anyway
+    envVars:
+      - key: VITE_API_URL
+        value: https://leash-api-q3rw.onrender.com
+      - key: VITE_USE_MOCKS
+        value: "false"
+    routes:
+      # it's a single-page app: /dashboard and /confirm/<token> only exist in the browser, so
+      # every path serves index.html. real files like /assets/*.js still win, Render only
+      # rewrites paths that don't exist
+      - type: rewrite
+        source: /*
+        destination: /index.html

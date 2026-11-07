@@ -52,6 +52,24 @@ function flaggedFields(order: Order): Set<string> {
   return flagged
 }
 
+// the demo store. matches STORE_NAME in backend/app/config.py
+const OUR_STORE = 'Fernwood Supply Co'
+
+// same idea as normalize_merchant in backend/app/intent/rules.py: case, extra spaces and a
+// trailing dot don't make it a different store
+function normalizeStore(name: string): string {
+  const words = name.toLowerCase().split(/\s+/).filter((word) => word !== '')
+  return words.join(' ').replace(/[.,;:!]+$/, '')
+}
+
+function differentStore(wanted: string | null, got: string): boolean {
+  // a mandate with no store named accepts any store
+  if (!wanted) {
+    return false
+  }
+  return normalizeStore(wanted) !== normalizeStore(got)
+}
+
 function joinDistinct(values: (string | null)[]): string {
   const seen: string[] = []
   for (const value of values) {
@@ -67,8 +85,9 @@ export function compareMandate(order: Order): CompareRow[] {
   const flagged = flaggedFields(order)
   const rows: CompareRow[] = []
 
-  function add(label: string, wanted: string | null, got: string, alwaysShow = false) {
-    let isFlagged = false
+  function add(label: string, wanted: string | null, got: string, alwaysShow = false, mismatch = false) {
+    // mismatch: we can see it's wrong ourselves, even if no check result was saved
+    let isFlagged = mismatch
     for (const field of FLAG_FIELDS[label] ?? []) {
       if (flagged.has(field)) {
         isFlagged = true
@@ -114,7 +133,9 @@ export function compareMandate(order: Order): CompareRow[] {
   }
   add('Price', wantedPrice, gotPrice, true)
 
-  add('Store', order.mandate.merchant, 'Fernwood Supply Co', true)
+  // the store the order really went to. null on the order means our own store
+  const orderedFrom = order.merchant ?? OUR_STORE
+  add('Store', order.mandate.merchant, orderedFrom, true, differentStore(order.mandate.merchant, orderedFrom))
 
   const expires = order.mandate.expires_at ? formatTime(order.mandate.expires_at) : null
   add('Valid until', expires, 'Ordered ' + formatTime(order.created_at))

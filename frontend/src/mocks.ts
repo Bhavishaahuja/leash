@@ -145,6 +145,8 @@ function order(input: MockOrderInput): OrderDetail {
     capture_id: input.status === 'captured' ? 'MOCKCAP' + input.id : null,
     void_result: input.status === 'voided' ? 'VOIDED' : null,
     vault_id: input.status === 'created' ? null : 'MOCKVAULT',
+    // null is our own store, like the API. mockPlacedOrder sets it for a wrong_store order
+    merchant: null,
     items: input.items,
     total: input.total,
     shipping_amount: input.shipping,
@@ -152,6 +154,7 @@ function order(input: MockOrderInput): OrderDetail {
     status: input.status,
     review_state: input.reviewState,
     authorization_expires_at: input.status === 'authorized' ? daysFromNow(29) : null,
+    watch_mode: 'normal',
     created_at: minutesAgo(input.createdMinutesAgo),
     mandate: input.mandate,
     intent_check: input.check,

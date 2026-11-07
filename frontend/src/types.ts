@@ -16,6 +16,9 @@ export type CheckedBy = 'rules' | 'ai'
 
 export type ApprovalAction = 'approve' | 'reject'
 
+// the rubber-stamp watch: sharp while the human has been approving too fast
+export type WatchMode = 'normal' | 'sharp'
+
 export type DemoScenario = 'clean' | 'wrong_color' | 'over_cap' | 'wrong_store'
 
 export interface OrderItem {
@@ -82,6 +85,9 @@ export interface Order {
   capture_id: string | null
   void_result: string | null
   vault_id: string | null
+  // the store the agent actually ordered from. null means Fernwood Supply Co, only a demo
+  // order names another one
+  merchant: string | null
   items: OrderItem[]
   total: string
   // null on orders from before it was saved
@@ -90,6 +96,8 @@ export interface Order {
   status: OrderStatus
   review_state: ReviewState | null
   authorization_expires_at: string | null
+  // sharp means the rubber-stamp watch was on when this order was checked
+  watch_mode: WatchMode
   created_at: string
   mandate: MandateSummary
   // newest check result. null before the check, or if saving it failed
