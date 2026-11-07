@@ -3,7 +3,16 @@
 
 import { scenarioBlocker } from './lib/demoScenarios'
 import { mockMandates, mockOrders, mockPlacedOrder } from './mocks'
-import type { DemoScenario, MandateSummary, Order, OrderDetail, PlacedOrder } from './types'
+import type {
+  ApprovalAction,
+  DemoScenario,
+  MandateSummary,
+  Order,
+  OrderDetail,
+  PlacedOrder,
+  ReviewLink,
+  ReviewView,
+} from './types'
 
 const API_URL = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/+$/, '')
 
@@ -63,8 +72,15 @@ export function hasSession(): boolean {
   return USE_MOCKS || readSessionToken() !== null
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = readSessionToken()
+interface RequestOptions {
+  // the review routes take the token in the URL and nothing else. the human's phone has no
+  // session, and a merchant testing the link on their own laptop shouldn't send theirs either
+  withSession?: boolean
+}
+
+async function request<T>(path: string, init?: RequestInit, options: RequestOptions = {}): Promise<T> {
+  const withSession = options.withSession ?? true
+  const token = withSession ? readSessionToken() : null
   const response = await fetch(API_URL + path, {
     ...init,
     headers: {
@@ -77,7 +93,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     // an expired session is no use to the next request either. a wrong password is a 401 too, and
     // dropping nothing is harmless there
-    if (response.status === 401) {
+    if (response.status === 401 && withSession) {
       writeSessionToken(null)
     }
 
@@ -91,6 +107,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, detail)
   }
 
+  // POST /review/{token}/opened is a 204 with no body
+  if (response.status === 204) {
+    return undefined as T
+  }
   return (await response.json()) as T
 }
 
@@ -120,23 +140,154 @@ function stripDetail(order: OrderDetail): Order {
   return plain
 }
 
-function settleMockOrder(orderId: number, nextStatus: 'captured' | 'voided'): Order {
-  const order = findMockOrder(orderId)
-  // same rule as the backend's require_status: only an authorized hold can be captured or voided
-  if (order.status !== 'authorized') {
-    const action = nextStatus === 'captured' ? 'capture' : 'void'
-    throw new ApiError(409, "Can't " + action + ' order ' + orderId + ' (status ' + order.status + ')')
+// review tokens handed out by the mock review-link call, token to order id. same rules as the
+// backend: a new link kills the old one, and a link works once
+const mockReviewTokens = new Map<string, number>()
+const usedMockTokens = new Set<string>()
+
+// the order id is in the token so a mock link still works in a fresh tab, where this
+// in-memory map starts empty. real tokens are opaque, never parse them
+function newMockToken(orderId: number): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  let token = 'mock' + orderId + '-'
+  for (const byte of bytes) {
+    token += byte.toString(16).padStart(2, '0')
   }
-  order.status = nextStatus
-  if (nextStatus === 'captured') {
-    order.capture_id = 'MOCKCAP' + orderId
+  return token
+}
+
+function isWaitingForReview(order: Order): boolean {
+  return order.status === 'authorized' && order.review_state === 'needs_review'
+}
+
+function createMockReviewLink(orderId: number): ReviewLink {
+  const order = findMockOrder(orderId)
+  if (!isWaitingForReview(order)) {
+    throw new ApiError(409, 'Order ' + orderId + " isn't waiting for review")
+  }
+  // calling this again replaces the link, so the old one stops working
+  for (const [token, id] of mockReviewTokens) {
+    if (id === orderId) {
+      mockReviewTokens.delete(token)
+    }
+  }
+  const token = newMockToken(orderId)
+  mockReviewTokens.set(token, orderId)
+  return { review_token: token, expires_at: order.authorization_expires_at ?? new Date().toISOString() }
+}
+
+function findMockReviewOrder(token: string): OrderDetail {
+  let orderId = mockReviewTokens.get(token)
+  if (orderId === undefined && mockReviewTokens.size === 0) {
+    // fresh tab: trust the id in the token, see newMockToken
+    const match = /^mock(\d+)-/.exec(token)
+    if (match && mockStore.some((order) => order.id === Number(match[1]))) {
+      orderId = Number(match[1])
+      mockReviewTokens.set(token, orderId)
+    }
+  }
+  if (orderId === undefined) {
+    throw new ApiError(404, { message: "This link isn't valid. The store may have sent a newer one." })
+  }
+  return findMockOrder(orderId)
+}
+
+function toReviewView(order: OrderDetail): ReviewView {
+  // only what the real GET /review/{token} sends: nothing the human doesn't need
+  const check = order.intent_check
+  return {
+    id: order.id,
+    items: order.items,
+    total: order.total,
+    shipping_amount: order.shipping_amount,
+    currency: order.currency,
+    status: order.status,
+    review_state: order.review_state,
+    authorization_expires_at: order.authorization_expires_at,
+    mandate: { buyer_label: order.mandate.buyer_label, raw_request: order.mandate.raw_request },
+    intent_check: check
+      ? {
+          verdict: check.verdict,
+          risk_score: check.risk_score,
+          reason: check.reason,
+          mismatched_fields: check.mismatched_fields,
+        }
+      : null,
+  }
+}
+
+function getMockReview(token: string): ReviewView {
+  const order = findMockReviewOrder(token)
+  if (usedMockTokens.has(token) || !isWaitingForReview(order)) {
+    throw new ApiError(410, { message: "This link was already used, or the order isn't waiting for review anymore." })
+  }
+  return toReviewView(order)
+}
+
+function openMockReview(token: string): void {
+  getMockReview(token)
+  const order = findMockReviewOrder(token)
+  // only the first call counts, so a refresh doesn't reset the clock
+  if (order.approval) {
+    return
+  }
+  const approval = {
+    id: order.id * 10 + order.approvals.length,
+    action: null,
+    decided_by: null,
+    opened_at: new Date().toISOString(),
+    decided_at: null,
+    decision_ms: null,
+    client_decision_ms: null,
+  }
+  order.approvals.push(approval)
+  order.approval = approval
+}
+
+function decideMockReview(token: string, action: ApprovalAction, clientDecisionMs: number): ReviewView {
+  const order = findMockReviewOrder(token)
+  if (usedMockTokens.has(token) || !isWaitingForReview(order)) {
+    throw new ApiError(409, {
+      message: 'This order was already decided.',
+      status: order.status,
+      review_state: order.review_state,
+    })
+  }
+
+  const now = new Date()
+  let approval = order.approval
+  if (!approval) {
+    // the page never reported it opened, so the server can't time it: decision_ms is 0
+    approval = {
+      id: order.id * 10 + order.approvals.length,
+      action: null,
+      decided_by: null,
+      opened_at: now.toISOString(),
+      decided_at: null,
+      decision_ms: null,
+      client_decision_ms: null,
+    }
+    order.approvals.push(approval)
+    order.approval = approval
+  }
+  approval.action = action
+  approval.decided_at = now.toISOString()
+  approval.decision_ms = now.getTime() - new Date(approval.opened_at ?? now.toISOString()).getTime()
+  approval.client_decision_ms = clientDecisionMs
+
+  if (action === 'approve') {
+    order.status = 'captured'
+    order.capture_id = 'MOCKCAP' + order.id
     order.review_state = 'approved'
   } else {
+    order.status = 'voided'
     order.void_result = 'VOIDED'
     order.review_state = 'rejected'
   }
   order.authorization_expires_at = null
-  return stripDetail(order)
+  usedMockTokens.add(token)
+  return toReviewView(order)
 }
 
 function placeMockDemoOrder(mandateId: number, scenario: DemoScenario): PlacedOrder {
@@ -209,16 +360,62 @@ export async function getOrder(orderId: number): Promise<OrderDetail> {
   return request<OrderDetail>('/orders/' + orderId)
 }
 
-export async function captureOrder(orderId: number): Promise<Order> {
+// ---- human review: merchant side ----
+
+// makes a new review link and kills any older one for this order. only call it when the merchant
+// asks, or a link already sent to the human stops working
+export async function createReviewLink(orderId: number): Promise<ReviewLink> {
   if (USE_MOCKS) {
-    return mockDelay(settleMockOrder(orderId, 'captured'))
+    return mockDelay(createMockReviewLink(orderId))
   }
-  return request<Order>('/orders/' + orderId + '/capture', { method: 'POST' })
+  return request<ReviewLink>('/orders/' + orderId + '/review-link', { method: 'POST' })
 }
 
-export async function voidOrder(orderId: number): Promise<Order> {
+// ---- human review: the confirm page ----
+
+function reviewPath(token: string): string {
+  return '/review/' + encodeURIComponent(token)
+}
+
+export async function getReview(token: string): Promise<ReviewView> {
   if (USE_MOCKS) {
-    return mockDelay(settleMockOrder(orderId, 'voided'))
+    return mockDelay(getMockReview(token))
   }
-  return request<Order>('/orders/' + orderId + '/void', { method: 'POST' })
+  return request<ReviewView>(reviewPath(token), undefined, { withSession: false })
+}
+
+// starts the server's attention clock. call once, after the order is really on screen
+export async function markReviewOpened(token: string): Promise<void> {
+  if (USE_MOCKS) {
+    openMockReview(token)
+    return mockDelay(undefined)
+  }
+  return request<void>(reviewPath(token) + '/opened', { method: 'POST' }, { withSession: false })
+}
+
+async function decideReview(token: string, action: ApprovalAction, decisionMs: number): Promise<ReviewView> {
+  // the backend wants a whole number that fits a Postgres int
+  const clientMs = Math.min(Math.max(Math.round(decisionMs), 0), 2147483647)
+  if (USE_MOCKS) {
+    return mockDelay(decideMockReview(token, action, clientMs))
+  }
+  return request<ReviewView>(
+    reviewPath(token) + '/' + action,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ decision_ms: clientMs }),
+    },
+    { withSession: false },
+  )
+}
+
+// captures the money
+export function approveReview(token: string, decisionMs: number): Promise<ReviewView> {
+  return decideReview(token, 'approve', decisionMs)
+}
+
+// releases the hold
+export function rejectReview(token: string, decisionMs: number): Promise<ReviewView> {
+  return decideReview(token, 'reject', decisionMs)
 }

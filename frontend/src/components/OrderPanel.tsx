@@ -2,11 +2,11 @@
 // ordered, then the intent check, then the human's decision. Opens on a grid row click.
 
 import { useEffect, useRef } from 'react'
-import { Link } from 'react-router'
 import { compareMandate } from '../lib/compare'
 import { describeItem, formatDateTime, formatDuration, formatMoney } from '../lib/format'
 import { DECISION_LABELS, RUBBER_STAMP_MS, decisionKind, displayStatus, isRubberStamp } from '../lib/orderState'
 import type { Order } from '../types'
+import { ReviewLinkBox } from './ReviewLinkBox'
 import { RiskBar } from './RiskBar'
 import { StatusChip } from './StatusChip'
 
@@ -174,9 +174,7 @@ export function OrderPanel({ order, onClose }: OrderPanelProps) {
 
         {order.status === 'authorized' && order.review_state === 'needs_review' && (
           <footer className="panel__foot">
-            <Link to={'/confirm/' + order.id} className="button button--primary">
-              Open confirm page
-            </Link>
+            <ReviewLinkBox key={order.id} orderId={order.id} />
           </footer>
         )}
       </aside>

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router'
 import { ApiError, hasSession, listMandates, logIn, placeDemoOrder } from '../api'
+import { ReviewLinkBox } from '../components/ReviewLinkBox'
 import { StatusChip, type DisplayStatus } from '../components/StatusChip'
 import { SCENARIOS, scenarioBlocker } from '../lib/demoScenarios'
 import { describeItem, formatMoney, formatTime } from '../lib/format'
@@ -271,9 +271,7 @@ function ResultCard({ order }: { order: PlacedOrder }) {
       {order.merchant && <p className="muted">At {order.merchant}</p>}
 
       {status === 'needs_review' && (
-        <Link to={'/confirm/' + order.id} className="primary-button">
-          Open confirm page
-        </Link>
+        <ReviewLinkBox key={order.id} orderId={order.id} />
       )}
     </div>
   )

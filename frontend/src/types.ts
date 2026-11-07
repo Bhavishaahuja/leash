@@ -112,3 +112,33 @@ export interface PlacedOrder extends OrderDetail {
   // null if the order never got a hold, or saving the check failed
   intent_check: Decision | null
 }
+
+// POST /orders/{id}/review-link. the only time the token is ever returned
+export interface ReviewLink {
+  review_token: string
+  // also when the link stops working: it's the PayPal hold's expiry
+  expires_at: string
+}
+
+// GET /review/{token}: all the confirm page gets. no ids, no PayPal fields, no mandate rules
+export interface ReviewView {
+  id: number
+  items: OrderItem[]
+  total: string
+  shipping_amount: string | null
+  currency: string
+  status: OrderStatus
+  review_state: ReviewState | null
+  authorization_expires_at: string | null
+  mandate: {
+    buyer_label: string
+    raw_request: string
+  }
+  // null if saving the check failed, so the page has to cope with no reason
+  intent_check: {
+    verdict: Verdict
+    risk_score: number | null
+    reason: string
+    mismatched_fields: string[] | null
+  } | null
+}

@@ -16,7 +16,7 @@ export default function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Route>
         {/* outside the merchant layout: the human sees only their decision */}
-        <Route path="/confirm/:orderId" element={<ConfirmPage />} />
+        <Route path="/confirm/:token" element={<ConfirmPage />} />
       </Routes>
     </BrowserRouter>
   )
