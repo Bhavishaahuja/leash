@@ -106,9 +106,15 @@ class AlwaysMatchClaude:
         return self
 
     def _create(self, **kwargs):
-        fields = {"verdict": "match", "risk_score": 5, "reason": "Matches.",
-                  "mismatched_fields": []}
-        block = SimpleNamespace(type="tool_use", name=kwargs["tools"][0]["name"], input=fields)
+        # both Claude calls come through here, so nothing in this file can reach the real API
+        tool_name = kwargs["tools"][0]["name"]
+        if tool_name == "record_mandate":
+            fields = {"item": "stainless steel camping mug", "quantity": 1, "max_price": 40,
+                      "currency": "USD", "merchant": "Fernwood Supply Co"}
+        else:
+            fields = {"verdict": "match", "risk_score": 5, "reason": "Matches.",
+                      "mismatched_fields": []}
+        block = SimpleNamespace(type="tool_use", name=tool_name, input=fields)
         return SimpleNamespace(stop_reason="tool_use", content=[block])
 
 
@@ -164,6 +170,9 @@ def client(sessions, paypal, monkeypatch):
 
     claude = AlwaysMatchClaude()
     app.dependency_overrides[get_session] = test_session
+    # mandates has its own Claude dependency. without this override POST /mandates built a real
+    # client: a TypeError in CI with no key, and a real paid call anywhere with one
+    app.dependency_overrides[mandates.get_anthropic_client] = lambda: claude
     app.dependency_overrides[orders.get_anthropic_client] = lambda: claude
     app.dependency_overrides[orders.get_paypal_client] = lambda: paypal
     return TestClient(app)
@@ -271,15 +280,16 @@ def test_with_no_agents_configured_every_key_is_rejected(client, paypal, mandate
     assert paypal.bodies == []
 
 
-def test_every_agent_can_create_mandates(client):
+def test_every_agent_can_create_mandates(client, sessions):
     # the name only matters on orders, but every configured agent has to get in
     for key in [WREN_KEY, THISTLE_KEY]:
         response = client.post(
-            "/mandates", json={"buyer_label": "Sam", "request_text": "x"},
+            "/mandates", json={"buyer_label": "Sam", "request_text": "One camping mug, max $40"},
             headers={"X-API-Key": key},
         )
-        # past auth: no Claude is set up for mandates here, so it fails later, not with a 401
-        assert response.status_code != 401
+        assert response.status_code == 201
+    with sessions() as session:
+        assert session.query(Mandate).count() == 2
 
 
 def test_the_agent_never_sees_its_own_name_back(client, mandate_id):
