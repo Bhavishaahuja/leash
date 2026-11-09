@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 import { MerchantLayout } from './components/MerchantLayout'
 import { ConfirmPage } from './pages/ConfirmPage'
 import { DashboardPage } from './pages/DashboardPage'
+import { DisputesPage } from './pages/DisputesPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { PlaceOrderPage } from './pages/PlaceOrderPage'
 
@@ -13,6 +14,7 @@ export default function App() {
         <Route element={<MerchantLayout />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/place-order" element={<PlaceOrderPage />} />
+          <Route path="/disputes" element={<DisputesPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
         {/* outside the merchant layout: the human sees only their decision */}

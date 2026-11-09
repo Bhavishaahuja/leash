@@ -1354,3 +1354,181 @@ p {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
+
+/* ---- disputes ---- */
+
+.disputes {
+  max-width: 820px;
+  margin: 0 auto;
+}
+
+.disputes .page__head {
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sync-summary {
+  margin-bottom: 16px;
+  color: var(--ink-muted);
+}
+
+.dispute-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.dispute-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 16px 18px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dispute-row:hover {
+  background: var(--bg);
+}
+
+.dispute-row:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.dispute-row--selected {
+  border-color: var(--primary);
+}
+
+.dispute-row__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dispute-row__title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.dispute-row__side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dispute-row__due {
+  font-size: 13px;
+  color: var(--review);
+  font-weight: 550;
+}
+
+.dispute-panel {
+  margin-top: 8px;
+  padding: 20px 22px;
+  overflow-wrap: anywhere;
+}
+
+.dispute-panel .eyebrow {
+  margin-top: 22px;
+}
+
+.dispute-panel .eyebrow:first-child {
+  margin-top: 0;
+}
+
+.dispute-panel__quote {
+  margin: 8px 0 12px;
+  padding: 12px 14px;
+  background: var(--surface-sunk);
+  border-radius: var(--radius);
+  font-size: 16px;
+}
+
+.dispute-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.dispute-facts dt {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.dispute-facts dd {
+  margin: 0;
+}
+
+.dispute-panel__items {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.dispute-panel__items li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+/* the price never breaks mid-number, the item name wraps instead */
+.dispute-panel__items li span:last-child {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.dispute-panel__reason {
+  font-weight: 550;
+  font-size: 16px;
+  margin: 8px 0 4px;
+}
+
+.dispute-panel__summary {
+  margin: 8px 0 6px;
+  padding: 14px 16px;
+  background: var(--primary-soft);
+  border-radius: var(--radius);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.dispute-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.dispute-panel__warn {
+  width: 100%;
+  font-weight: 550;
+  color: var(--review);
+}
+
+.dispute-panel__filed {
+  margin-top: 18px;
+  font-weight: 600;
+  color: var(--captured);
+}
+
+@media (max-width: 640px) {
+  .dispute-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .dispute-panel {
+    padding: 16px;
+  }
+}

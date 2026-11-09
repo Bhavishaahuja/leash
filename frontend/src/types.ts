@@ -150,3 +150,88 @@ export interface ReviewView {
     mismatched_fields: string[] | null
   } | null
 }
+
+// ---- disputes. mirrors backend/app/disputes.py ----
+
+// GET /disputes. reason and status are PayPal's own strings, kept open since PayPal can add values
+export interface Dispute {
+  // Leash's id, what the /disputes/{id}/... routes take
+  id: number
+  // PayPal's case id, e.g. PP-R-ABC-10001234
+  paypal_dispute_id: string
+  order_id: number
+  reason: string | null
+  status: string | null
+  evidence_submitted: boolean
+  evidence_submitted_at: string | null
+  // what it was filed as, e.g. OTHER. null until submitted
+  evidence_type: string | null
+  // a summary is drafted, so it can be filed
+  has_summary: boolean
+  // as of the last sync. null when PayPal isn't waiting on the merchant
+  seller_response_due_at: string | null
+  created_at: string
+}
+
+// POST /disputes/sync
+export interface DisputeSyncResult {
+  orders_checked: number
+  disputes_found: number
+  created: number
+  updated: number
+  // PayPal failing on one order doesn't stop the rest
+  errors: { order_id: number; message: string }[]
+}
+
+// the packet: only Leash's own records, the same four parts as the PDF it files
+export interface EvidencePacket {
+  dispute: { paypal_dispute_id: string; reason: string | null; status: string | null }
+  mandate: {
+    id: number
+    raw_request: string
+    rules: Record<string, unknown>
+    max_price: string | null
+    max_price_inclusive: boolean
+    merchant: string | null
+    expires_at: string | null
+    created_at: string | null
+  }
+  order: {
+    id: number
+    store: string
+    items: OrderItem[]
+    total: string | null
+    shipping_amount: string | null
+    currency: string
+    status: string
+    paypal_order_id: string | null
+    capture_id: string | null
+    created_at: string | null
+  }
+  intent_check: {
+    verdict: Verdict
+    risk_score: number | null
+    reason: string
+    mismatched_fields: string[] | null
+    checked_by: CheckedBy
+    checked_at: string | null
+    watch_mode: WatchMode
+  } | null
+  decision: {
+    // "automatic capture" or "human review". null if nobody decided
+    released_by: string | null
+    review_state: string | null
+    action: string | null
+    decision_ms: number | null
+    opened_at?: string | null
+    decided_at: string | null
+  }
+}
+
+// GET /disputes/{id}/evidence and POST /disputes/{id}/redraft
+export interface DisputeEvidence {
+  dispute: Dispute
+  packet: EvidencePacket
+  // Claude's draft for the PayPal reviewer. exactly what submit sends as the notes
+  summary: string
+}

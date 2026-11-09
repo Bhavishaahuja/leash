@@ -48,6 +48,9 @@ export function MerchantLayout() {
                 <NavLink to="/place-order" className="topbar__link">
                   Place order
                 </NavLink>
+                <NavLink to="/disputes" className="topbar__link">
+                  Disputes
+                </NavLink>
               </>
             )}
             {loggedIn && !USE_MOCKS && (

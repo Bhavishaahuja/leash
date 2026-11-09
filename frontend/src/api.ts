@@ -6,6 +6,10 @@ import { mockMandates, mockOrders, mockPlacedOrder } from './mocks'
 import type {
   ApprovalAction,
   DemoScenario,
+  Dispute,
+  DisputeEvidence,
+  DisputeSyncResult,
+  EvidencePacket,
   MandateSummary,
   Order,
   OrderDetail,
@@ -434,4 +438,172 @@ export function approveReview(token: string, decisionMs: number): Promise<Review
 // releases the hold
 export function rejectReview(token: string, decisionMs: number): Promise<ReviewView> {
   return decideReview(token, 'reject', decisionMs)
+}
+
+// ---- disputes: merchant side ----
+
+// two disputes on captured mock orders: one waiting on the merchant, one already answered
+const mockDisputes: Dispute[] = [
+  {
+    id: 1,
+    paypal_dispute_id: 'PP-R-MOCK-10001234',
+    order_id: 101,
+    reason: 'MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED',
+    status: 'WAITING_FOR_SELLER_RESPONSE',
+    evidence_submitted: false,
+    evidence_submitted_at: null,
+    evidence_type: null,
+    has_summary: false,
+    seller_response_due_at: new Date(Date.now() + 9 * 24 * 3600 * 1000).toISOString(),
+    created_at: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+  },
+  {
+    id: 2,
+    paypal_dispute_id: 'PP-R-MOCK-10005678',
+    order_id: 104,
+    reason: 'UNAUTHORISED',
+    status: 'UNDER_REVIEW',
+    evidence_submitted: true,
+    evidence_submitted_at: new Date(Date.now() - 26 * 3600 * 1000).toISOString(),
+    evidence_type: 'OTHER',
+    has_summary: true,
+    seller_response_due_at: null,
+    created_at: new Date(Date.now() - 3 * 24 * 3600 * 1000).toISOString(),
+  },
+]
+const mockSummaries = new Map<number, string>([
+  [2, 'The account holder set a standing instruction for this purchase before it was placed, and the order matched it.'],
+])
+
+function findMockDispute(disputeId: number): Dispute {
+  const found = mockDisputes.find((dispute) => dispute.id === disputeId)
+  if (!found) {
+    throw new ApiError(404, 'Dispute ' + disputeId + ' not found')
+  }
+  return found
+}
+
+function mockPacket(dispute: Dispute): EvidencePacket {
+  // same parts as build_evidence_packet, from the mock order
+  const order = findMockOrder(dispute.order_id)
+  const check = order.intent_check
+  const approval = order.approval
+  const auto = order.review_state === 'auto_approved'
+  return {
+    dispute: { paypal_dispute_id: dispute.paypal_dispute_id, reason: dispute.reason, status: dispute.status },
+    mandate: {
+      id: order.mandate.id,
+      raw_request: order.mandate.raw_request,
+      rules: order.mandate.rules,
+      max_price: order.mandate.max_price,
+      max_price_inclusive: order.mandate.max_price_inclusive,
+      merchant: order.mandate.merchant,
+      expires_at: order.mandate.expires_at,
+      created_at: order.mandate.created_at,
+    },
+    order: {
+      id: order.id,
+      store: order.merchant ?? 'Fernwood Supply Co',
+      items: order.items,
+      total: order.total,
+      shipping_amount: order.shipping_amount,
+      currency: order.currency,
+      status: order.status,
+      paypal_order_id: order.paypal_order_id,
+      capture_id: order.capture_id,
+      created_at: order.created_at,
+    },
+    intent_check: check
+      ? {
+          verdict: check.verdict,
+          risk_score: check.risk_score,
+          reason: check.reason,
+          mismatched_fields: check.mismatched_fields,
+          checked_by: check.checked_by,
+          checked_at: check.created_at,
+          watch_mode: order.watch_mode,
+        }
+      : null,
+    decision: {
+      released_by: auto ? 'automatic capture' : approval?.action ? 'human review' : null,
+      review_state: order.review_state,
+      action: auto ? 'capture' : (approval?.action ?? null),
+      decision_ms: auto ? null : (approval?.decision_ms ?? null),
+      opened_at: approval?.opened_at ?? null,
+      decided_at: auto ? (check?.created_at ?? null) : (approval?.decided_at ?? null),
+    },
+  }
+}
+
+function mockEvidence(disputeId: number, redraft: boolean): DisputeEvidence {
+  const dispute = findMockDispute(disputeId)
+  if (redraft && dispute.evidence_submitted) {
+    throw new ApiError(409, { message: 'Evidence was already submitted, the summary is what PayPal has now' })
+  }
+  if (redraft || !mockSummaries.has(disputeId)) {
+    const packet = mockPacket(dispute)
+    const opening = redraft ? 'Before any money moved, ' : 'Before the payment was taken, '
+    mockSummaries.set(
+      disputeId,
+      opening + 'the buyer wrote "' + packet.mandate.raw_request + '". Order ' + packet.order.id +
+        ' was checked against that request and released by ' + (packet.decision.released_by ?? 'nobody') +
+        '. The items, store and total match what the buyer asked for.',
+    )
+    dispute.has_summary = true
+  }
+  return { dispute, packet: mockPacket(dispute), summary: mockSummaries.get(disputeId) ?? '' }
+}
+
+export async function listDisputes(limit = 50): Promise<Dispute[]> {
+  if (USE_MOCKS) {
+    return mockDelay(mockDisputes.slice(0, limit))
+  }
+  return request<Dispute[]>('/disputes?limit=' + limit)
+}
+
+// asks PayPal about every captured order, saves what it finds. safe to run again
+export async function syncDisputes(): Promise<DisputeSyncResult> {
+  if (USE_MOCKS) {
+    let captured = 0
+    for (const order of mockStore) {
+      if (order.status === 'captured') {
+        captured += 1
+      }
+    }
+    return mockDelay({ orders_checked: captured, disputes_found: mockDisputes.length, created: 0, updated: mockDisputes.length, errors: [] })
+  }
+  return request<DisputeSyncResult>('/disputes/sync', { method: 'POST' })
+}
+
+// the first look drafts the summary with Claude (a few seconds), later looks return the saved one
+export async function getDisputeEvidence(disputeId: number): Promise<DisputeEvidence> {
+  if (USE_MOCKS) {
+    return mockDelay(mockEvidence(disputeId, false))
+  }
+  return request<DisputeEvidence>('/disputes/' + disputeId + '/evidence')
+}
+
+export async function redraftDisputeEvidence(disputeId: number): Promise<DisputeEvidence> {
+  if (USE_MOCKS) {
+    return mockDelay(mockEvidence(disputeId, true))
+  }
+  return request<DisputeEvidence>('/disputes/' + disputeId + '/redraft', { method: 'POST' })
+}
+
+// files the PDF and summary with PayPal. PayPal takes this once
+export async function submitDisputeEvidence(disputeId: number): Promise<Dispute> {
+  if (USE_MOCKS) {
+    const dispute = findMockDispute(disputeId)
+    if (dispute.evidence_submitted) {
+      throw new ApiError(409, { message: 'Evidence was already submitted for this dispute' })
+    }
+    if (!dispute.has_summary) {
+      throw new ApiError(409, { message: 'Draft the summary first' })
+    }
+    dispute.evidence_submitted = true
+    dispute.evidence_submitted_at = new Date().toISOString()
+    dispute.evidence_type = 'OTHER'
+    return mockDelay(dispute)
+  }
+  return request<Dispute>('/disputes/' + disputeId + '/submit-evidence', { method: 'POST' })
 }
