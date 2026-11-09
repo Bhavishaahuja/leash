@@ -518,6 +518,8 @@ Success is a `201` with the order object plus `decisions` and `approvals`, like 
 
 ### `DELETE /demo/seeded`
 
-Merchant only, used by `backend/scripts/seed_demo.py --reset`. Deletes the seeded orders and mandates, which are the ones with a `buyer_label` starting with `seed-demo:`. Success is a `200` with `deleted_orders` and `deleted_mandates`.
+Merchant only, used by `backend/scripts/seed_demo.py --reset`. Deletes the seeded orders and mandates, which are the ones with a `buyer_label` starting with `seed-demo:`. Success is a `200` with `deleted_orders`, `deleted_mandates` and `deleted_disputes`.
+
+Any dispute rows synced onto those orders are deleted too, since an order can't be deleted while a dispute points at it. That only forgets them in Leash: the dispute stays open at PayPal, the same way a capture does.
 
 It's a `409` with `open_order_ids` in `detail` while any of those orders still has an open hold, so nothing gets forgotten at PayPal. Void those first.

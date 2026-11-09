@@ -16,7 +16,7 @@ from sqlalchemy import delete, select
 from backend.app.auth import require_merchant
 from backend.app.config import STORE_NAME, get_settings
 from backend.app.intent.rules import normalize_merchant
-from backend.app.models import Approval, Decision, Mandate, Order, OrderStatus
+from backend.app.models import Approval, Decision, Dispute, Mandate, Order, OrderStatus
 from backend.app.orders import (
     CENT,
     Claude,
@@ -221,9 +221,18 @@ def delete_seeded(session: DbSession):
             },
         )
 
+    # a dispute points at its order, so it has to go first or Postgres refuses the order delete.
+    # same deal as captures: the dispute stays at PayPal, this only forgets it here
+    deleted_disputes = session.execute(
+        delete(Dispute).where(Dispute.order_id.in_(order_ids))
+    ).rowcount
     session.execute(delete(Approval).where(Approval.order_id.in_(order_ids)))
     session.execute(delete(Decision).where(Decision.order_id.in_(order_ids)))
     session.execute(delete(Order).where(Order.id.in_(order_ids)))
     session.execute(delete(Mandate).where(Mandate.id.in_(mandate_ids)))
     session.commit()
-    return {"deleted_orders": len(order_ids), "deleted_mandates": len(mandate_ids)}
+    return {
+        "deleted_orders": len(order_ids),
+        "deleted_mandates": len(mandate_ids),
+        "deleted_disputes": deleted_disputes,
+    }

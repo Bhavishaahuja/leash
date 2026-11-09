@@ -315,6 +315,11 @@ def run_reset(api):
     deleted = response.json()
     print("Deleted " + str(deleted["deleted_orders"]) + " orders and "
           + str(deleted["deleted_mandates"]) + " mandates.")
+    # .get: an API from before this change doesn't send the count
+    deleted_disputes = deleted.get("deleted_disputes", 0)
+    if deleted_disputes:
+        print("Also forgot " + str(deleted_disputes) + " disputes on those orders. They're still "
+              "open at PayPal, answer them in the Resolution Center if you need to.")
 
 
 def main():

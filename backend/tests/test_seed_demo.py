@@ -11,13 +11,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from keyed_client import AGENT_KEY, MERCHANT_HEADERS, MERCHANT_KEY
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.app import demo, mandates, orders, review
 from backend.app.db import Base, get_session
-from backend.app.models import Approval, Decision, Mandate, Order, OrderStatus
+from backend.app.models import Approval, Decision, Dispute, Mandate, Order, OrderStatus
 from backend.scripts import seed_demo
 
 VAULT_ID = "test-vault"
@@ -115,6 +115,13 @@ def sessions():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
+
+    # SQLite ignores foreign keys unless asked, Postgres never does. without this a delete that
+    # Render refuses (an order with a dispute on it) passes here
+    @event.listens_for(engine, "connect")
+    def enforce_foreign_keys(connection, record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -332,6 +339,22 @@ def test_reset_voids_open_holds_then_deletes_everything(api, paypal, sessions, c
         assert session.query(Mandate).count() == 0
         assert session.query(Decision).count() == 0
         assert session.query(Approval).count() == 0
+
+
+def test_reset_also_clears_disputes_on_seeded_orders(api, sessions, capsys):
+    # a PayPal dispute synced onto a seeded order used to make Postgres refuse the order delete
+    seed_demo.run_seed(api, VAULT_ID, seed_demo.SCENARIOS[:1])
+    with sessions() as session:
+        order = session.query(Order).one()
+        session.add(Dispute(paypal_dispute_id="PP-R-TEST-1", order_id=order.id))
+        session.commit()
+
+    seed_demo.run_reset(api)
+
+    with sessions() as session:
+        assert session.query(Dispute).count() == 0
+        assert session.query(Order).count() == 0
+    assert "Also forgot 1 disputes" in capsys.readouterr().out
 
 
 def test_reset_with_nothing_seeded_is_fine(api, paypal, capsys):
