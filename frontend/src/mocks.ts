@@ -147,6 +147,8 @@ function order(input: MockOrderInput): OrderDetail {
     vault_id: input.status === 'created' ? null : 'MOCKVAULT',
     // null is our own store, like the API. mockPlacedOrder sets it for a wrong_store order
     merchant: null,
+    // the two seed agents take turns, like seed_demo.py
+    agent_name: input.id % 2 === 1 ? 'Wren' : 'Thistle',
     items: input.items,
     total: input.total,
     shipping_amount: input.shipping,
@@ -521,6 +523,8 @@ export function mockPlacedOrder(id: number, source: MandateSummary, scenario: De
   return {
     ...placed,
     merchant,
+    // like DEMO_AGENT_NAME in backend/app/demo.py
+    agent_name: 'Demo page',
     review_state: isClean ? 'auto_approved' : 'needs_review',
     intent_check: check,
   }

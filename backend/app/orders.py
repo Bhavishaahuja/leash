@@ -38,7 +38,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app import mandate_parser, rubber_stamp
-from backend.app.auth import require_agent, require_merchant
+from backend.app.auth import AgentName, require_agent, require_merchant
 from backend.app.config import STORE_NAME, get_settings
 from backend.app.db import get_session
 from backend.app.intent.check import build_decision, run_intent_check
@@ -168,6 +168,8 @@ class OrderOut(BaseModel):
     vault_id: str | None
     # null means our own store. only a demo order names another one
     merchant: str | None
+    # the shopping agent that placed it, from its API key. null on orders from before that
+    agent_name: str | None
     items: list
     total: Decimal
     shipping_amount: Decimal | None
@@ -644,10 +646,13 @@ def item_to_json(item):
     }
 
 
-def place_order(session, mandate, items, shipping, vault_id, paypal, claude, merchant=None):
+def place_order(
+    session, mandate, items, shipping, vault_id, paypal, claude, merchant=None, agent_name=None
+):
     # the whole path an order takes: save, hold at PayPal, check, auto-decide. POST /orders and
     # POST /demo/orders both land here, so the demo can't drift from what an agent's order does.
     # merchant stays None for a real agent order, those are always at our one store.
+    # agent_name is whoever the caller's key says it is, never something the body claimed.
     # returns (order, payer_action_url), and the url is None unless a buyer has to approve first
     items_json = []
     for item in items:
@@ -663,6 +668,7 @@ def place_order(session, mandate, items, shipping, vault_id, paypal, claude, mer
         currency=CURRENCY,
         vault_id=vault_id,
         merchant=merchant,
+        agent_name=agent_name,
         status=OrderStatus.created,
     )
     session.add(order)
@@ -715,9 +721,12 @@ def place_order(session, mandate, items, shipping, vault_id, paypal, claude, mer
     "",
     response_model=OrderPlacedNeedsBuyer | AgentOrderStatus,
     status_code=201,
-    dependencies=[Depends(require_agent)],
 )
-def create_order(body: OrderCreate, session: DbSession, paypal: PayPal, claude: Claude):
+def create_order(
+    body: OrderCreate, session: DbSession, paypal: PayPal, claude: Claude, agent_name: AgentName
+):
+    # agent_name comes from the X-API-Key header. OrderCreate has no field for it, so an
+    # "agent_name" in the body is dropped like any other unknown field
     mandate = session.get(Mandate, body.mandate_id)
     if mandate is None:
         raise HTTPException(
@@ -725,7 +734,8 @@ def create_order(body: OrderCreate, session: DbSession, paypal: PayPal, claude: 
         )
 
     order, payer_action_url = place_order(
-        session, mandate, body.items, body.shipping, body.vault_id, paypal, claude
+        session, mandate, body.items, body.shipping, body.vault_id, paypal, claude,
+        agent_name=agent_name,
     )
 
     # the agent doesn't get the reason or anything else from the check, or it could read why it was

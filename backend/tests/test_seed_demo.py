@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend.app import demo, mandates, orders, review
+from backend.app.config import DEFAULT_AGENT_NAME, get_settings
 from backend.app.db import Base, get_session
 from backend.app.models import Approval, Decision, Dispute, Mandate, Order, OrderStatus
 from backend.scripts import seed_demo
@@ -482,3 +483,56 @@ def test_expired_hold_doesnt_block_deleting(api, http, sessions, capsys):
 @pytest.mark.parametrize("headers", [{}, {"X-API-Key": AGENT_KEY}, {"X-API-Key": "wrong"}])
 def test_delete_needs_the_merchant_key(http, headers):
     assert http.delete("/demo/seeded", headers=headers).status_code == 401
+
+
+# ---- two agents ----
+
+
+@pytest.fixture
+def two_agent_api(http, monkeypatch):
+    monkeypatch.setenv("AGENT_API_KEYS", "wren-key:Wren,thistle-key:Thistle")
+    get_settings.cache_clear()
+    return seed_demo.SeedApi(http, "", ["wren-key", "thistle-key"], MERCHANT_KEY)
+
+
+def test_seeded_orders_are_split_across_two_agents(two_agent_api, capsys):
+    results = seed_demo.run_seed(two_agent_api, VAULT_ID)
+
+    assert seed_demo.print_results(results) == 0
+    names = []
+    for result in results:
+        names.append(result["order"]["agent_name"])
+    # they take turns, starting with the first key
+    assert names[:4] == ["Wren", "Thistle", "Wren", "Thistle"]
+    assert names.count("Wren") == 9
+    assert names.count("Thistle") == 8
+
+
+def test_each_agent_gets_clean_and_sneaky_orders(two_agent_api, capsys):
+    results = seed_demo.run_seed(two_agent_api, VAULT_ID)
+
+    states_by_agent = {"Wren": set(), "Thistle": set()}
+    for result in results:
+        states_by_agent[result["order"]["agent_name"]].add(result["scenario"]["expected"])
+    for states in states_by_agent.values():
+        assert states == {"auto_approved", "needs_review"}
+
+
+def test_the_table_shows_each_orders_agent(two_agent_api, capsys):
+    results = seed_demo.run_seed(two_agent_api, VAULT_ID)
+    capsys.readouterr()
+
+    seed_demo.print_results(results)
+
+    output = capsys.readouterr().out
+    assert "AGENT" in output
+    assert "Wren" in output
+    assert "Thistle" in output
+
+
+def test_one_agent_key_places_every_order(api, capsys):
+    # slot 1 wraps round to the only key, the old AGENT_API_KEY under its default name
+    results = seed_demo.run_seed(api, VAULT_ID, seed_demo.SCENARIOS[:2])
+
+    for result in results:
+        assert result["order"]["agent_name"] == DEFAULT_AGENT_NAME

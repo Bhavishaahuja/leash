@@ -1311,9 +1311,9 @@ def test_every_order_response_has_the_same_shape(client, paypal):
 
     shared = {
         "id", "mandate_id", "paypal_order_id", "authorization_id", "capture_id", "void_result",
-        "vault_id", "merchant", "items", "total", "shipping_amount", "currency", "status",
-        "review_state", "authorization_expires_at", "watch_mode", "created_at", "mandate",
-        "intent_check", "approval",
+        "vault_id", "merchant", "agent_name", "items", "total", "shipping_amount", "currency",
+        "status", "review_state", "authorization_expires_at", "watch_mode", "created_at",
+        "mandate", "intent_check", "approval",
     }
     assert set(listed) == shared
     assert set(detail) == shared | {"decisions", "approvals"}

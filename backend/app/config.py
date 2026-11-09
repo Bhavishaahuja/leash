@@ -1,9 +1,10 @@
 # settings come from env vars (or .env locally). names match .env.example
 
+import json
 import logging
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -15,6 +16,12 @@ STORE_ALIASES = ["fernwood", "fernwood supply", "fernwood supply co"]
 
 # every Claude call in the app uses this, so a model bump only happens here
 CLAUDE_MODEL = "claude-sonnet-5-5"
+
+# what an order placed with the old single AGENT_API_KEY is credited to. that key keeps working so
+# a deploy doesn't lock the live agent out before AGENT_API_KEYS is set, see agent_keys
+DEFAULT_AGENT_NAME = "Shopping agent"
+# fits Order.agent_name
+MAX_AGENT_NAME_LENGTH = 100
 
 
 class Settings(BaseSettings):
@@ -39,6 +46,10 @@ class Settings(BaseSettings):
     # sent as the X-API-Key header. left empty, that whole side of the API just returns 401
     agent_api_key: str = ""
     merchant_api_key: str = ""
+    # one key per shopping agent, and the name its orders show up under. either a comma list,
+    # key:Name,key:Name, or a JSON object, {"key": "Name"}. the name always comes from here and
+    # never from what the agent sends, see auth.require_agent
+    agent_api_keys: str = ""
     # the dashboard's login. left empty, login is off and the dashboard can't get a session
     demo_merchant_password: str = ""
     # the saved sandbox wallet POST /demo/orders pays with, from spikes/.vault_token.json. without
@@ -53,6 +64,20 @@ class Settings(BaseSettings):
     # a match only captures on its own below this risk score. at or above it, a human decides
     auto_capture_max_risk: int = 30
 
+    @field_validator("agent_api_keys")
+    @classmethod
+    def agent_api_keys_must_parse(cls, value):
+        # a typo here should stop the API starting, not quietly lock an agent out
+        parse_agent_api_keys(value)
+        return value
+
+    @model_validator(mode="after")
+    def agent_keys_arent_the_merchant_key(self):
+        # an agent holding the merchant key could read every order and every reason it was flagged
+        if self.merchant_api_key and self.merchant_api_key in agent_keys(self):
+            raise ValueError("An agent key can't be the same as MERCHANT_API_KEY")
+        return self
+
     @field_validator("database_url")
     @classmethod
     def use_psycopg_driver(cls, url):
@@ -63,6 +88,59 @@ class Settings(BaseSettings):
         if url.startswith("postgresql://"):
             url = "postgresql+psycopg://" + url[len("postgresql://"):]
         return url
+
+
+def parse_agent_api_keys(setting):
+    # AGENT_API_KEYS as {key: name}. raises ValueError on anything it can't read for sure
+    text = setting.strip()
+    if not text:
+        return {}
+
+    pairs = []
+    # "[" too, so a JSON list gets told it should be an object, not that it's missing a colon
+    if text.startswith("{") or text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise ValueError("AGENT_API_KEYS isn't valid JSON") from error
+        if not isinstance(parsed, dict):
+            raise ValueError("AGENT_API_KEYS JSON has to be an object of key to name")
+        for key, name in parsed.items():
+            pairs.append((key, name))
+    else:
+        for entry in text.split(","):
+            if not entry.strip():
+                continue
+            key, separator, name = entry.partition(":")
+            if not separator:
+                raise ValueError("Each AGENT_API_KEYS entry has to be key:Name")
+            pairs.append((key, name))
+
+    keys = {}
+    for key, name in pairs:
+        if not isinstance(key, str) or not isinstance(name, str):
+            raise ValueError("AGENT_API_KEYS keys and names have to be text")
+        key = key.strip()
+        name = " ".join(name.split())
+        if not key or not name:
+            raise ValueError("Every agent in AGENT_API_KEYS needs a key and a name")
+        if len(name) > MAX_AGENT_NAME_LENGTH:
+            raise ValueError("Agent name too long: " + name[:20] + "...")
+        if key in keys:
+            # two names for one key would make the name depend on which entry came last
+            raise ValueError("The same key is in AGENT_API_KEYS twice")
+        keys[key] = name
+    return keys
+
+
+def agent_keys(settings):
+    # every agent key the API accepts, with the name its orders are credited to. the old single
+    # AGENT_API_KEY stays in as DEFAULT_AGENT_NAME unless AGENT_API_KEYS names it itself
+    keys = parse_agent_api_keys(settings.agent_api_keys)
+    legacy_key = settings.agent_api_key.strip()
+    if legacy_key and legacy_key not in keys:
+        keys[legacy_key] = DEFAULT_AGENT_NAME
+    return keys
 
 
 def cors_origins(setting):

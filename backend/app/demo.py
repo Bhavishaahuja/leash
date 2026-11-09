@@ -46,6 +46,10 @@ OTHER_STORE_NAME = "Ridgeline Outdoors"
 # first one that doesn't appear in the mandate's color wins
 WRONG_COLORS = ["red", "green", "orange"]
 
+# who a /place-order order is credited to. the merchant placed it, standing in for an agent, so it
+# gets its own name instead of borrowing a real agent's
+DEMO_AGENT_NAME = "Demo page"
+
 router = APIRouter(prefix="/demo", tags=["demo"])
 
 
@@ -244,6 +248,7 @@ def create_demo_order(body: DemoOrderCreate, session: DbSession, paypal: PayPal,
         paypal,
         claude,
         merchant=demo_order.merchant,
+        agent_name=DEMO_AGENT_NAME,
     )
 
     # read it back, so this shows what got saved and not what the session remembers

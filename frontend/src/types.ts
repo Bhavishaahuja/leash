@@ -101,6 +101,9 @@ export interface Order {
   // the store the agent actually ordered from. null means Fernwood Supply Co, only a demo
   // order names another one
   merchant: string | null
+  // which shopping agent placed it, worked out by the API from the agent's key. "Demo page" for
+  // an order from /place-order, null on orders from before agents had names
+  agent_name: string | null
   items: OrderItem[]
   total: string
   // null on orders from before it was saved

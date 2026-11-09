@@ -4,6 +4,8 @@
 #   10 clean orders that should auto-capture, and 7 sneaky ones that should stop for a human.
 #   Five of the clean ones are one per catalog category (sneakers, groceries, electronics, event
 #   tickets, subscription), and their mandates are the ones /place-order breaks on camera.
+#   The orders alternate between the first two agents in AGENT_API_KEYS, so the dashboard shows
+#   more than one agent. With only one agent key, that one places them all.
 #
 # Run from the repo root, in cmd:
 #   .venv\Scripts\python.exe backend\scripts\seed_demo.py                 local API on :8000
@@ -12,7 +14,8 @@
 # or set LEASH_API_URL once in the cmd window instead of passing --base-url every time:
 #   set LEASH_API_URL=https://leash-api-q3rw.onrender.com
 #
-# Needs AGENT_API_KEY and MERCHANT_API_KEY in .env matching the API's, plus spikes/.vault_token.json
+# Needs AGENT_API_KEYS (or AGENT_API_KEY) and MERCHANT_API_KEY in .env matching the API's, plus
+# spikes/.vault_token.json
 # (run spikes/spike2_vault.py once). Each order is about 2 Claude calls, and money never really
 # moves: it's sandbox.
 #
@@ -33,7 +36,7 @@ sys.path.insert(0, REPO_ROOT)
 
 import requests  # noqa: E402
 
-from backend.app.config import get_settings  # noqa: E402
+from backend.app.config import agent_keys, get_settings  # noqa: E402
 from backend.app.demo import SEED_LABEL_PREFIX  # noqa: E402
 
 # --base-url wins, then LEASH_API_URL, then the local API. read straight from the environment on
@@ -199,6 +202,11 @@ SCENARIOS = [
     },
 ]
 
+# which of the two agents places each scenario: every other one, so each agent gets clean and
+# sneaky orders. the agent_name backfill migration (c3e8d1a5f962) alternates the same way
+for index, scenario in enumerate(SCENARIOS):
+    scenario["agent"] = index % 2
+
 
 class ApiError(Exception):
     pass
@@ -207,11 +215,22 @@ class ApiError(Exception):
 class SeedApi:
     # http is a requests session, or the tests' TestClient, which takes the same calls
 
-    def __init__(self, http, base_url, agent_key, merchant_key):
+    def __init__(self, http, base_url, agent_keys, merchant_key):
+        # agent_keys is a list, or one key on its own. the API works out each agent's name from
+        # its key, the script never says who it is
+        if isinstance(agent_keys, str):
+            agent_keys = [agent_keys]
         self.http = http
         self.base_url = base_url.rstrip("/")
-        self.agent = {"X-API-Key": agent_key}
+        self.agents = []
+        for key in agent_keys:
+            self.agents.append({"X-API-Key": key})
         self.merchant = {"X-API-Key": merchant_key}
+
+    def agent_for(self, scenario):
+        # with one key, slot 1 wraps round to it
+        slot = scenario.get("agent", 0)
+        return self.agents[slot % len(self.agents)]
 
     def call(self, method, path, headers=None, body=None, ok=(200, 201)):
         response = self.http.request(
@@ -238,11 +257,12 @@ class SeedApi:
         return found
 
     def create_order(self, scenario, vault_id):
-        mandate = self.call("POST", "/mandates", self.agent, {
+        agent = self.agent_for(scenario)
+        mandate = self.call("POST", "/mandates", agent, {
             "buyer_label": SEED_LABEL_PREFIX + scenario["name"],
             "request_text": scenario["request"],
         }).json()
-        placed = self.call("POST", "/orders", self.agent, {
+        placed = self.call("POST", "/orders", agent, {
             "mandate_id": mandate["id"],
             "vault_id": vault_id,
             "items": scenario["items"],
@@ -312,9 +332,10 @@ def cell(value, width):
 
 
 def print_results(results):
-    widths = [27, 14, 14, 11, 5]
+    widths = [27, 14, 14, 11, 5, 16]
     header = (cell("SCENARIO", widths[0]) + cell("EXPECTED", widths[1]) + cell("ACTUAL", widths[2])
-              + cell("STATUS", widths[3]) + cell("RISK", widths[4]) + "REASON")
+              + cell("STATUS", widths[3]) + cell("RISK", widths[4]) + cell("AGENT", widths[5])
+              + "REASON")
     print(header)
     print("-" * 120)
     for result in results:
@@ -326,6 +347,7 @@ def print_results(results):
             + cell(order.get("review_state"), widths[2])
             + cell(order.get("status"), widths[3])
             + cell(check.get("risk_score"), widths[4])
+            + cell(order.get("agent_name"), widths[5])
             + str(check.get("reason", "-"))
         )
 
@@ -388,13 +410,21 @@ def main():
     args = parser.parse_args()
 
     settings = get_settings()
-    if not settings.agent_api_key or not settings.merchant_api_key:
-        print("AGENT_API_KEY and MERCHANT_API_KEY have to be in .env, matching the API's.")
+    known_agents = agent_keys(settings)
+    if not known_agents or not settings.merchant_api_key:
+        print("AGENT_API_KEYS (or AGENT_API_KEY) and MERCHANT_API_KEY have to be in .env, "
+              "matching the API's.")
         return 1
 
-    api = SeedApi(
-        requests.Session(), args.base_url, settings.agent_api_key, settings.merchant_api_key
-    )
+    # the first two, in the order AGENT_API_KEYS lists them
+    seed_keys = list(known_agents)[:2]
+    seed_names = []
+    for key in seed_keys:
+        seed_names.append(known_agents[key])
+    if len(seed_keys) < 2:
+        print("Only one agent key, so " + seed_names[0] + " places every order.")
+
+    api = SeedApi(requests.Session(), args.base_url, seed_keys, settings.merchant_api_key)
 
     try:
         if args.reset:
@@ -409,7 +439,7 @@ def main():
         with open(VAULT_FILE) as vault_file:
             vault_id = json.load(vault_file)["vault_id"]
 
-        print("Seeding " + api.base_url + "...")
+        print("Seeding " + api.base_url + " as " + " and ".join(seed_names) + "...")
         results = run_seed(api, vault_id)
     except (ApiError, requests.RequestException) as error:
         print("Failed: " + str(error))

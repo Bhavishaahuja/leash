@@ -33,6 +33,8 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      - key: AGENT_API_KEYS
+        sync: false
       - key: AGENT_API_KEY
         sync: false
       - key: MERCHANT_API_KEY

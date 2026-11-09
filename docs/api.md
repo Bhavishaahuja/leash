@@ -10,7 +10,7 @@ There are four kinds of caller. Sending the wrong credential, or none, returns `
 
 | Caller | Sends | Can reach |
 |---|---|---|
-| Shopping agent | `X-API-Key: <AGENT_API_KEY>` | `POST /mandates`, `POST /orders`, `POST /orders/{id}/authorize`, `GET /agent/orders/{id}` |
+| Shopping agent | `X-API-Key: <its key from AGENT_API_KEYS>` | `POST /mandates`, `POST /orders`, `POST /orders/{id}/authorize`, `GET /agent/orders/{id}` |
 | Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `GET /stats`, `POST /orders/{id}/review-link`, `POST /demo/orders`, every `/disputes` route |
 | Merchant scripts | `X-API-Key: <MERCHANT_API_KEY>` | The same as the dashboard |
 | Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject` |
@@ -97,6 +97,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
   "void_result": null,
   "vault_id": "abc123",
   "merchant": null,
+  "agent_name": "Wren",
   "items": [
     {
       "name": "Trail runner",
@@ -158,6 +159,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 - **`capture_id`** is set once money is taken. **`void_result`** is PayPal's status, normally `"VOIDED"`, once a hold is released. Both can be `null`.
 - **`shipping_amount`** is `null` on orders from before it was saved.
 - **Item `model` and `event_date`** are optional. `event_date` is a date like `"2026-12-05"`. Orders from before they existed don't have the keys at all, so treat missing the same as `null`.
+- **`agent_name`** is the shopping agent that placed the order. The API works it out from the agent's key, never from the request. `"Demo page"` for an order from `/place-order`, `"Shopping agent"` for one placed with the old single `AGENT_API_KEY`, and `null` on orders from before agents had names.
 - **`merchant`** is `null` for an order at Fernwood Supply Co, which is every agent order. Only `POST /demo/orders` sets it.
 - **`max_price`** can be in another currency, so don't hardcode `$`. Read `mandate.rules.currency`. If that's `null`, treat it as USD.
 - **`max_price_inclusive`**: `true` means "up to" and `false` means "under".

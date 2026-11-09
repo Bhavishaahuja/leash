@@ -118,6 +118,9 @@ class Order(Base):
     # the store the order is at. null means ours, which is every real agent order. only
     # POST /demo/orders sets it, so the merchant rule has a wrong store to catch
     merchant: Mapped[str | None] = mapped_column(String(200))
+    # which shopping agent placed it, from the API key it used (AGENT_API_KEYS). never from the
+    # request body. null on orders from before agents had names
+    agent_name: Mapped[str | None] = mapped_column(String(100))
     items: Mapped[list] = mapped_column(JSON)
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     # the part of total that's shipping. null on orders saved before this column existed,

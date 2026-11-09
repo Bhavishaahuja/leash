@@ -83,13 +83,14 @@ This is a hackathon demo in the PayPal sandbox. The security is real but deliber
 
 | Who | Holds | Can do |
 |---|---|---|
-| Shopping agent | `AGENT_API_KEY` | Create mandates, create and authorize orders, read an order's status. Nothing else |
+| Shopping agent | Its own key from `AGENT_API_KEYS` | Create mandates, create and authorize orders, read an order's status. Nothing else |
 | Merchant dashboard | An 8 hour session token, from logging in with `DEMO_MERCHANT_PASSWORD` | Read orders and mandates, create review links, place the fixed demo orders |
 | Merchant scripts | `MERCHANT_API_KEY` | The same as the dashboard |
 | Human reviewing an order | One review link | See that one order, approve or reject it once |
 
 What this protects:
 
+- **An agent can't pass as another agent.** Every order records which agent placed it, and the API takes that from the agent's key. A name in the request body is ignored.
 - **An agent can't approve its own order.** It can't read a review link or create one, and approving takes a link.
 - **Review links are single-use and stored hashed.** Only the SHA-256 of a link's token is saved, so a leaked database can't approve anything. A link dies when its PayPal authorization expires.
 - **No API key in the browser.** The dashboard logs in with a password and holds a session token, so the merchant key stays on the server.

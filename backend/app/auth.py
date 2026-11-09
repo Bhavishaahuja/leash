@@ -1,5 +1,6 @@
 # Who's allowed to call what. Demo-grade on purpose, see "Security model" in the README.
-#   agent key:     what the shopping agent holds. it can create mandates and orders, nothing else
+#   agent key:     what a shopping agent holds. it can create mandates and orders, nothing else.
+#                  each agent has its own (AGENT_API_KEYS), and the key is who the agent is
 #   merchant key:  what scripts hold. it reads orders and creates review links
 #   session token: what the dashboard holds after logging in. it does what the merchant key does,
 #                  so the key itself never has to reach a browser
@@ -15,7 +16,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException
 from fastapi.security import APIKeyHeader, HTTPBearer
 
-from backend.app.config import get_settings
+from backend.app.config import agent_keys, get_settings
 
 API_KEY_HEADER = "X-API-Key"
 SESSION_LIFETIME_SECONDS = 8 * 60 * 60
@@ -81,7 +82,27 @@ def session_token_is_valid(token, now=None):
 
 
 def require_agent(provided: ProvidedKey):
-    check_key(provided, get_settings().agent_api_key)
+    # returns the agent's name. it comes from the key alone: whatever the request body says about
+    # who sent it is ignored, so one agent can't put its orders under another's name
+    return agent_name_for_key(provided, agent_keys(get_settings()))
+
+
+def agent_name_for_key(provided, keys):
+    # no agents configured means no agent gets in, same as an unset key in check_key
+    if not provided or not keys:
+        raise unauthorized()
+    # every key gets compared, so how long this takes doesn't say which one nearly matched
+    matched_name = None
+    for key, name in keys.items():
+        if secrets.compare_digest(provided.encode(), key.encode()):
+            matched_name = name
+    if matched_name is None:
+        raise unauthorized()
+    return matched_name
+
+
+# for a route that needs to know which agent is calling, not just that one is
+AgentName = Annotated[str, Depends(require_agent)]
 
 
 def require_merchant(provided: ProvidedKey, bearer: ProvidedBearer):
