@@ -1,13 +1,17 @@
 # Render Blueprint for the Leash API and frontend. Spec: https://render.com/docs/blueprint-spec
 #
-# The Postgres database (leash-db, Oregon, free) already exists and isn't declared here.
-# Its URL goes in DATABASE_URL by hand (use the Internal Database URL, same region).
+# The Postgres database (leash-db, Oregon) already exists and isn't declared here, so its plan is
+# set in the dashboard only. It's on a paid plan: a free Render Postgres expires 30 days after it's
+# created. Its URL goes in DATABASE_URL by hand (use the Internal Database URL, same region).
 
 services:
   - type: web
     name: leash-api
     runtime: python
-    plan: free
+    # the $7/month instance (0.5 CPU, 512 MB). paid instances never spin down, so judges don't wait
+    # a minute for the first request. this has to match the dashboard, or a Blueprint sync puts the
+    # service back on the free plan
+    plan: 0.5c-512mb
     # same region as leash-db so the internal database URL works
     region: oregon
     branch: main
