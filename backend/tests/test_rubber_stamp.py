@@ -182,25 +182,35 @@ def test_normal_mode_follows_the_auto_capture_setting(monkeypatch):
     assert should_escalate(check(verdict="match", risk_score=15), False) is True
 
 
-def test_sharp_mode_only_escalates_risky_orders():
-    assert should_escalate(check(verdict="unsure", risk_score=59), True) is False
-    assert should_escalate(check(verdict="unsure", risk_score=60), True) is True
+def test_sharp_mode_only_escalates_risky_matches():
+    assert should_escalate(check(verdict="match", risk_score=59), True) is False
+    assert should_escalate(check(verdict="match", risk_score=60), True) is True
     assert should_escalate(check(verdict="match", risk_score=45), True) is False
 
 
+@pytest.mark.parametrize("risk_score", [0, 10, 45, 59, 60, 90])
+@pytest.mark.parametrize("watch_active", [True, False])
+def test_unsure_always_goes_to_a_human(risk_score, watch_active):
+    # sharp mode used to capture unsure under 60. the evals caught it taking money for a
+    # substitution Claude wasn't sure about, so unsure is never auto-captured now
+    assert should_escalate(check(verdict="unsure", risk_score=risk_score), watch_active) is True
+
+
 def test_sharp_vs_normal_on_the_same_order():
-    middling = check(verdict="unsure", risk_score=40)
+    middling = check(verdict="match", risk_score=40)
     assert should_escalate(middling, False) is True
     assert should_escalate(middling, True) is False
 
 
 def test_let_through_is_only_when_the_watch_changed_the_answer():
-    assert let_through_by_watch(check(verdict="unsure", risk_score=40), True) is True
+    assert let_through_by_watch(check(verdict="match", risk_score=40), True) is True
     # a clean match captures either way, so the watch didn't let it through
     assert let_through_by_watch(check(verdict="match", risk_score=5), True) is False
     # escalated anyway
-    assert let_through_by_watch(check(verdict="unsure", risk_score=70), True) is False
-    assert let_through_by_watch(check(verdict="unsure", risk_score=40), False) is False
+    assert let_through_by_watch(check(verdict="match", risk_score=70), True) is False
+    assert let_through_by_watch(check(verdict="match", risk_score=40), False) is False
+    # unsure is never let through, watch or not
+    assert let_through_by_watch(check(verdict="unsure", risk_score=40), True) is False
 
 
 def test_hard_rule_failed_is_false_on_old_rows():
@@ -330,13 +340,13 @@ def test_limit_words_leaves_short_text_alone():
 
 
 class FakeClaude:
-    # answers unsure at 40 unless a test says otherwise: escalated in normal mode, let through
-    # in sharp mode, which is the difference these tests are about
+    # answers a match at 40 unless a test says otherwise: escalated in normal mode (30 and up),
+    # let through in sharp mode (under 60), which is the difference these tests are about
     def __init__(self):
         self.answer = {
-            "verdict": "unsure",
+            "verdict": "match",
             "risk_score": 40,
-            "reason": "Can't tell if it's waterproof",
+            "reason": "Probably the right jacket, the listing is thin",
             "mismatched_fields": [],
         }
         self.error = None
@@ -496,7 +506,7 @@ def test_normal_mode_is_unchanged(client, claude):
     assert order["watch_mode"] == "normal"
     assert order["status"] == "authorized"
     assert order["review_state"] == "needs_review"
-    assert order["intent_check"]["reason"] == "Can't tell if it's waterproof"
+    assert order["intent_check"]["reason"] == "Probably the right jacket, the listing is thin"
     assert SHARP_MARKER not in claude.last_prompt()
 
 
@@ -523,7 +533,7 @@ def test_a_recent_reject_keeps_the_watch_off(client, db_sessions):
     assert place_order(client)["watch_mode"] == "normal"
 
 
-def test_sharp_mode_lets_a_low_risk_unsure_order_through(client, db_sessions, claude, paypal):
+def test_sharp_mode_lets_a_middling_match_through(client, db_sessions, claude, paypal):
     turn_watch_on(db_sessions)
     order = place_order(client)
 
@@ -533,12 +543,30 @@ def test_sharp_mode_lets_a_low_risk_unsure_order_through(client, db_sessions, cl
     # auditable: the dashboard says why nobody was asked
     assert order["intent_check"]["reason"] == LET_THROUGH_REASON
     # what Claude actually judged is still on record
-    assert order["intent_check"]["verdict"] == "unsure"
+    assert order["intent_check"]["verdict"] == "match"
     assert order["intent_check"]["risk_score"] == 40
     assert len(paypal.captures) == 1
     # one call, with the flag in it
     assert len(claude.requests) == 1
     assert SHARP_MARKER in claude.last_prompt()
+
+
+def test_sharp_mode_holds_a_low_risk_unsure_order(client, db_sessions, claude, paypal):
+    # the case the evals caught: unsure at 45 used to be captured with the watch on
+    turn_watch_on(db_sessions)
+    claude.answer = {"verdict": "unsure", "risk_score": 45,
+                     "reason": "Mandate said trail runners, order has trail walking shoe",
+                     "mismatched_fields": []}
+    order = place_order(client)
+
+    assert order["watch_mode"] == "sharp"
+    assert order["status"] == "authorized"
+    assert order["review_state"] == "needs_review"
+    # Claude's own words reach the human, not the let-through note
+    assert order["intent_check"]["reason"] == (
+        "Mandate said trail runners, order has trail walking shoe"
+    )
+    assert paypal.captures == []
 
 
 def test_sharp_mode_still_escalates_risky_orders_with_a_sharp_reason(client, db_sessions, claude):
@@ -597,7 +625,7 @@ def test_a_failed_capture_keeps_claudes_reason(client, db_sessions, paypal):
 
     assert order["status"] == "authorized"
     assert order["review_state"] == "needs_review"
-    assert order["intent_check"]["reason"] == "Can't tell if it's waterproof"
+    assert order["intent_check"]["reason"] == "Probably the right jacket, the listing is thin"
 
 
 def test_a_clean_match_in_sharp_mode_keeps_its_own_reason(client, db_sessions, claude):

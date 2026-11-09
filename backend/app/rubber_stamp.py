@@ -43,6 +43,11 @@ def should_escalate(check, watch_active):
         return True
     if check.verdict == "mismatch":
         return True
+    # unsure means Claude couldn't tell whether the shopper wanted this. that's a question for a
+    # human, watch or no watch: the evals caught sharp mode capturing an unsure substitution at
+    # risk 45 (backend/evals, case sub-03). so only a match can ever skip review
+    if check.verdict == "unsure":
+        return True
     # added: Claude errored or timed out, so the 50 on it is a placeholder, not a judgment.
     # without this, sharp mode would capture orders nobody actually checked
     if check.reason in CHECK_DID_NOT_RUN_REASONS:
@@ -51,6 +56,7 @@ def should_escalate(check, watch_active):
     if check.risk_score is None:
         return True
 
+    # only matches get this far
     if watch_active:
         # human is rubber-stamping, so only interrupt them for the risky stuff
         return check.risk_score >= 60

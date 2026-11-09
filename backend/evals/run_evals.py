@@ -22,8 +22,9 @@
 #   .venv\Scripts\python.exe backend\evals\run_evals.py --modes normal --cases model-01 qty-02
 #
 # The Claude modes need ANTHROPIC_API_KEY in .env, and make one call per case that passes the
-# rules (43 of the 50 cases right now), so about 130 calls for all three. Results go to
-# backend/evals/results.md unless --out says otherwise.
+# rules (43 of the 50 cases right now), so about 130 calls for all three. A full run (every
+# mode, every case) saves to backend/evals/results.md. A partial run only prints, so it can't
+# replace the full report with a slice of it, unless --out says where to save.
 
 import argparse
 import json
@@ -429,7 +430,8 @@ def main():
     parser = argparse.ArgumentParser(description="Score the intent check against cases.json")
     parser.add_argument("--modes", nargs="+", choices=mode_names, default=mode_names)
     parser.add_argument("--cases", nargs="+", metavar="ID", help="only these case ids")
-    parser.add_argument("--out", default=RESULTS_FILE)
+    parser.add_argument("--out", help="where to save the report. default: results.md, "
+                        "full runs only")
     parser.add_argument("--workers", type=int, default=4,
                         help="Claude calls at once, for the modes that make them")
     args = parser.parse_args()
@@ -473,11 +475,19 @@ def main():
         results_by_mode.append((mode, run_mode(cases, mode, client, args.workers)))
 
     report = build_report(results_by_mode)
-    with open(args.out, "w", encoding="utf-8") as out_file:
-        out_file.write(report)
     print()
     print(report)
-    print("Saved to " + args.out)
+
+    out_path = args.out
+    full_run = len(modes) == len(MODES) and not args.cases
+    if out_path is None and full_run:
+        out_path = RESULTS_FILE
+    if out_path is None:
+        print("Partial run, not saved. Pass --out to keep it.")
+        return 0
+    with open(out_path, "w", encoding="utf-8") as out_file:
+        out_file.write(report)
+    print("Saved to " + out_path)
     return 0
 
 

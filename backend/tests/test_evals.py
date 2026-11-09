@@ -146,14 +146,14 @@ def mode_named(name):
     raise AssertionError("no mode " + name)
 
 
-def test_the_watch_threshold_lets_a_middling_unsure_through(cases):
-    # unsure at 45: normal mode asks a human, the watch's 60 threshold doesn't. that's the app's
+def test_the_watch_threshold_lets_a_middling_match_through(cases):
+    # a match at 45: normal mode asks a human, the watch's 60 threshold doesn't. that's the app's
     # should_escalate, and the reason sharp and sharp_prompt are separate modes
     clean = []
     for case in cases:
         if case["category"] == "clean":
             clean.append(case)
-    claude = FixedClaude("unsure", 45)
+    claude = FixedClaude("match", 45)
 
     normal = run_evals.run_mode(clean, mode_named("normal"), claude, workers=1)
     sharp = run_evals.run_mode(clean, mode_named("sharp"), claude, workers=1)
@@ -165,8 +165,10 @@ def test_the_watch_threshold_lets_a_middling_unsure_through(cases):
         assert result.auto_captured is True
 
 
-def test_a_mismatch_is_held_in_every_mode(cases):
-    claude = FixedClaude("mismatch", 20)
+@pytest.mark.parametrize("verdict", ["mismatch", "unsure"])
+def test_mismatch_and_unsure_are_held_in_every_mode(cases, verdict):
+    # unsure in sharp mode is the miss the evals found, sub-03. low risk on purpose
+    claude = FixedClaude(verdict, 20)
     for mode in run_evals.MODES[1:]:
         for result in run_evals.run_mode(cases[:3], mode, claude, workers=2):
             assert result.auto_captured is False
@@ -213,3 +215,25 @@ def test_report_lists_every_wrong_case_by_id(cases, no_real_claude):
 
 def test_a_pipe_in_a_reason_doesnt_break_the_table():
     assert run_evals.table_cell("a | b") == "a \\| b"
+
+
+# ---- saving ----
+
+
+def test_a_partial_run_doesnt_replace_the_full_report(tmp_path, monkeypatch, no_real_claude):
+    # running one mode used to overwrite results.md with just that mode
+    results_file = tmp_path / "results.md"
+    monkeypatch.setattr(run_evals, "RESULTS_FILE", str(results_file))
+    monkeypatch.setattr("sys.argv", ["run_evals.py", "--modes", "rules_only"])
+
+    assert run_evals.main() == 0
+    assert not results_file.exists()
+
+
+def test_a_partial_run_saves_where_out_says(tmp_path, monkeypatch, no_real_claude):
+    out_file = tmp_path / "rules_only.md"
+    monkeypatch.setattr("sys.argv", ["run_evals.py", "--modes", "rules_only", "--out",
+                                     str(out_file)])
+
+    assert run_evals.main() == 0
+    assert "## Wrong auto-captures" in out_file.read_text(encoding="utf-8")

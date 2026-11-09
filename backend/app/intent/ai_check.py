@@ -54,6 +54,26 @@ TIMED_OUT_REASON = "Check timed out, please review"
 INSTRUCTIONS_FIELD = "instructions_in_order"
 INSTRUCTIONS_REASON = "Order text tried to instruct the checker"
 
+# ---- which field names Claude may flag ----
+# mismatched_fields is how the dashboard, sharp reasons and the fix suggestion know what's wrong,
+# so a name the mandate and order don't have ("warranty", "brand_tier") is worse than useless.
+# those get dropped. what's allowed is every key in the mandate's rules and on the order's items,
+# plus these: the order's own fields, the everyday names for them, and the prompt's vocabulary
+ORDER_FIELDS = [
+    "item", "name", "category", "color", "size", "model", "event_date", "date", "quantity",
+    "unit_price", "price", "total", "shipping", "merchant", "store", "currency",
+]
+CHECKER_FIELDS = ["extra_item", "substitution", INSTRUCTIONS_FIELD]
+# what a mandate's rules can hold, for when there's no mandate to read them from
+MANDATE_FIELDS = [
+    "item", "category", "color", "size", "model", "event_date", "quantity", "max_price",
+    "currency", "max_price_inclusive", "merchant", "expires_at", "notes",
+]
+
+# a mismatch whose every field got dropped: Claude is sure something's wrong but named nothing
+# real. that can't capture and can't be shown as a reason either, so it goes to a human as unsure
+UNCONFIRMED_REASON = "Couldn't confirm what differs, please review"
+
 
 class AICheckError(Exception):
     # Claude answered, but not with anything we can trust
@@ -124,7 +144,8 @@ def run_check(client, mandate, order, clock, started, sharp=False):
 
         tool_input = find_tool_input(response)
         if tool_input is not None:
-            return validate_output(tool_input, sharp)
+            allowed = allowed_fields(mandate, order)
+            return validate_output(tool_input, sharp, allowed, order.id)
         # no finished tool call this time, go around once more
 
     raise AICheckError("Claude didn't call the tool after " + str(MAX_ATTEMPTS) + " tries")
@@ -160,22 +181,83 @@ def find_tool_input(response):
 # ---- validating what came back ----
 
 
-def validate_output(tool_input, sharp=False):
+def validate_output(tool_input, sharp=False, allowed=None, order_id=None):
+    # allowed is the field names this order can be flagged on, see allowed_fields. leaving it out
+    # still filters, against what any mandate and order can have, so this never skips the check
+    if allowed is None:
+        allowed = default_allowed_fields()
+
     verdict = clean_verdict(tool_input.get("verdict"))
     risk_score = clean_risk_score(tool_input.get("risk_score"))
     reason = clean_reason(tool_input.get("reason"))
     if sharp:
         reason = limit_words(reason, SHARP_MAX_WORDS)
-    mismatched_fields = clean_mismatched_fields(tool_input.get("mismatched_fields"))
+    flagged_fields = clean_mismatched_fields(tool_input.get("mismatched_fields"))
 
-    # a match captures money, so it doesn't get the benefit of the doubt if it contradicts itself
-    if verdict == Verdict.match and mismatched_fields:
+    # a match captures money, so it doesn't get the benefit of the doubt if it contradicts itself.
+    # checked before anything is dropped: a match that flags only made-up fields must not turn
+    # into a clean match by losing them
+    if verdict == Verdict.match and flagged_fields:
         raise AICheckError("Verdict is match but mismatched_fields isn't empty")
+
+    mismatched_fields, dropped_fields = split_known_fields(flagged_fields, allowed)
+    if dropped_fields:
+        logger.warning(
+            "Dropped fields the mandate and order don't have from order %s's check: %s",
+            order_id, ", ".join(dropped_fields),
+        )
+
+    # this can only move an order toward a human. unsure is never auto-captured, see
+    # should_escalate. the reason is replaced, Claude's one is about a field that isn't there
+    if verdict == Verdict.mismatch and dropped_fields and not mismatched_fields:
+        return AICheckResult(
+            Verdict.unsure, max(risk_score, FAILED_RISK_SCORE), UNCONFIRMED_REASON, []
+        )
 
     if INSTRUCTIONS_FIELD in mismatched_fields:
         reason = INSTRUCTIONS_REASON
 
     return AICheckResult(verdict, risk_score, reason, mismatched_fields)
+
+
+def allowed_fields(mandate, order):
+    # every name this order could really differ from its mandate on
+    allowed = set(ORDER_FIELDS)
+    for name in CHECKER_FIELDS:
+        allowed.add(name)
+    for name in (mandate.rules or {}):
+        allowed.add(normalize_field_name(name))
+    for item in order.items or []:
+        for name in item:
+            allowed.add(normalize_field_name(name))
+    return allowed
+
+
+def default_allowed_fields():
+    allowed = set(ORDER_FIELDS)
+    for name in CHECKER_FIELDS + MANDATE_FIELDS:
+        allowed.add(name)
+    return allowed
+
+
+def normalize_field_name(name):
+    # "Event date", "event-date" and "EVENT_DATE" are all event_date
+    words = name.strip().casefold().replace("-", " ").replace("_", " ").split()
+    return "_".join(words)
+
+
+def split_known_fields(flagged_fields, allowed):
+    # (kept, dropped). kept is normalized and has no repeats, dropped is as Claude wrote it
+    kept = []
+    dropped = []
+    for name in flagged_fields:
+        normalized = normalize_field_name(name)
+        if normalized in allowed:
+            if normalized not in kept:
+                kept.append(normalized)
+        else:
+            dropped.append(name)
+    return kept, dropped
 
 
 def clean_verdict(value):

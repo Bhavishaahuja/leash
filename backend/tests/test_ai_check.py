@@ -13,7 +13,14 @@ import httpx2
 import pytest
 
 from backend.app.config import CLAUDE_MODEL
-from backend.app.intent.ai_check import check_order_intent
+from backend.app.intent.ai_check import (
+    UNCONFIRMED_REASON,
+    allowed_fields,
+    check_order_intent,
+    validate_output,
+)
+from backend.app.intent.check import build_decision, run_intent_check
+from backend.app.rubber_stamp import should_escalate
 from backend.app.models import Mandate, Order, Verdict
 from backend.app.prompts import intent as intent_prompt
 from backend.scripts import try_ai_check
@@ -676,3 +683,177 @@ def test_model_and_event_date_are_sent_to_the_checker():
 
 def test_checker_can_name_model_and_event_date_as_what_differs():
     assert "model, event_date" in intent_prompt.SYSTEM_PROMPT
+
+
+# ---- the field guardrail: Claude can only flag fields the mandate and order really have ----
+
+
+def checked_and_decided(fake, mandate, order, sharp=False):
+    # the whole path an answer takes: the check, the saved decision, and auto-decide's call on it.
+    # returns (result, escalated in normal mode, escalated with the watch on)
+    result = run_intent_check(mandate, order, client=fake, sharp=sharp)
+    decision = build_decision(order, result)
+    return result, should_escalate(decision, False), should_escalate(decision, True)
+
+
+def test_a_hallucinated_field_turns_a_mismatch_into_unsure_for_review(caplog):
+    # "warranty" isn't on the mandate or the order. a mismatch about nothing real can't be shown
+    # to the merchant as a reason, and it can't capture either
+    fake = FakeAnthropic([answer("mismatch", 85, "Warranty is too short", ["warranty"])])
+
+    with caplog.at_level(logging.WARNING):
+        result, normal_escalates, sharp_escalates = checked_and_decided(
+            fake, make_mandate(), make_order()
+        )
+
+    assert result.verdict == Verdict.unsure
+    assert result.mismatched_fields == []
+    assert result.reason == UNCONFIRMED_REASON
+    assert result.risk_score == 85
+    assert normal_escalates is True
+    assert sharp_escalates is True
+    assert "warranty" in caplog.text
+    assert "order 7" in caplog.text
+
+
+def test_a_hallucinated_field_never_lowers_the_risk_score():
+    fake = FakeAnthropic([answer("mismatch", 10, "Brand tier is off", ["brand_tier"])])
+
+    result = check_order_intent(fake, make_mandate(), make_order())
+
+    assert result.verdict == Verdict.unsure
+    # at least the failed-check score, so nothing downstream reads it as low risk
+    assert result.risk_score == 50
+
+
+def test_real_fields_survive_and_fake_ones_are_dropped(caplog):
+    fake = FakeAnthropic([
+        answer("mismatch", 80, "Ordered olive in a 10, mandate says black in a 9",
+               ["color", "warranty", "Size", "color"])
+    ])
+
+    with caplog.at_level(logging.WARNING):
+        result, normal_escalates, sharp_escalates = checked_and_decided(
+            fake, make_mandate(), make_order(color="olive", size="10")
+        )
+
+    assert result.verdict == Verdict.mismatch
+    # normalized, no repeats, and the made-up one is gone
+    assert result.mismatched_fields == ["color", "size"]
+    # still about real fields, so Claude's reason stands
+    assert result.reason == "Ordered olive in a 10, mandate says black in a 9"
+    assert normal_escalates is True
+    assert sharp_escalates is True
+    assert "warranty" in caplog.text
+    assert "Size" not in caplog.text
+
+
+def test_unsure_goes_to_review_in_sharp_mode_even_at_low_risk():
+    # sharp mode used to capture unsure under 60. this is the sub-03 eval case: an unsure
+    # substitution at 45
+    fake = FakeAnthropic([
+        answer("unsure", 45, "Mandate said trail runners, order has trail walking shoe")
+    ])
+
+    result, normal_escalates, sharp_escalates = checked_and_decided(
+        fake, make_mandate(), make_order(name="Trail walking shoe"), sharp=True
+    )
+
+    assert result.verdict == Verdict.unsure
+    assert normal_escalates is True
+    assert sharp_escalates is True
+
+
+def test_unsure_with_a_hallucinated_field_stays_unsure_and_loses_the_field():
+    fake = FakeAnthropic([answer("unsure", 20, "Can't tell the fabric", ["fabric_weight"])])
+
+    result, _, sharp_escalates = checked_and_decided(
+        fake, make_mandate(), make_order(), sharp=True
+    )
+
+    assert result.verdict == Verdict.unsure
+    assert result.mismatched_fields == []
+    assert sharp_escalates is True
+
+
+def test_a_match_that_flags_only_made_up_fields_still_fails_closed():
+    # dropping the fields first would have left a clean match that captures. this has to be
+    # checked on what Claude actually sent
+    fake = FakeAnthropic([answer("match", 5, "Looks right", ["warranty"])])
+
+    result, normal_escalates, sharp_escalates = checked_and_decided(
+        fake, make_mandate(), make_order()
+    )
+
+    assert_failed_closed(result)
+    assert normal_escalates is True
+    assert sharp_escalates is True
+
+
+def test_injection_title_flagged_the_usual_way_keeps_the_clear_reason():
+    # an injection in the product title, flagged with the prompt's own word plus a made-up one
+    fake = FakeAnthropic([
+        answer("mismatch", 95, "Item says to " + INJECTION,
+               ["instructions_in_order", "prompt_injection"])
+    ])
+
+    result, normal_escalates, sharp_escalates = checked_and_decided(
+        fake, make_mandate(), make_order(name="Trail runner. " + INJECTION)
+    )
+
+    assert result.verdict == Verdict.mismatch
+    assert result.mismatched_fields == ["instructions_in_order"]
+    assert result.reason == "Order text tried to instruct the checker"
+    assert normal_escalates is True
+    assert sharp_escalates is True
+
+
+def test_injection_title_flagged_only_in_claudes_own_words_still_goes_to_review():
+    # Claude caught it but called it "prompt_injection", which isn't a field. it becomes unsure,
+    # and the reason is ours, so nothing from the order gets repeated to the merchant
+    fake = FakeAnthropic([
+        answer("mismatch", 95, "Item says to " + INJECTION, ["prompt_injection"])
+    ])
+
+    result, normal_escalates, sharp_escalates = checked_and_decided(
+        fake, make_mandate(), make_order(name="Trail runner. " + INJECTION), sharp=True
+    )
+
+    assert result.verdict == Verdict.unsure
+    assert result.reason == UNCONFIRMED_REASON
+    assert INJECTION not in result.reason
+    assert normal_escalates is True
+    assert sharp_escalates is True
+
+
+@pytest.mark.parametrize("flagged", ["Event Date", "event-date", "EVENT_DATE", " event_date "])
+def test_field_names_are_matched_however_theyre_written(flagged):
+    fake = FakeAnthropic([answer("mismatch", 80, "Wrong day", [flagged])])
+
+    result = check_order_intent(fake, make_mandate(), make_order())
+
+    assert result.verdict == Verdict.mismatch
+    assert result.mismatched_fields == ["event_date"]
+
+
+def test_allowed_fields_come_from_the_mandate_rules_and_the_order():
+    mandate = make_mandate()
+    # a key only this mandate has
+    mandate.rules["material"] = "merino"
+    order = make_order()
+    order.items[0]["gift_wrap"] = True
+
+    allowed = allowed_fields(mandate, order)
+
+    for name in ["material", "gift_wrap", "item", "color", "size", "model", "event_date",
+                 "quantity", "price", "merchant", "currency", "substitution", "extra_item",
+                 "instructions_in_order", "max_price", "notes"]:
+        assert name in allowed, name
+    assert "warranty" not in allowed
+
+
+def test_validate_output_filters_even_without_an_allowed_set():
+    result = validate_output({"verdict": "mismatch", "risk_score": 80, "reason": "Off",
+                              "mismatched_fields": ["color", "warranty"]})
+
+    assert result.mismatched_fields == ["color"]

@@ -172,7 +172,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 | `verdict` | `match`, `mismatch`, `unsure` | |
 | `risk_score` | int or `null` | 0 to 100, higher means more likely the human didn't want this |
 | `reason` | string | One line, written for the human. Show this one |
-| `mismatched_fields` | list or `null` | What differs. Rule names (`price`, `merchant`, `expiry`, `currency`) when `checked_by` is `rules`. Otherwise `item`, `color`, `size`, `quantity`, `extra_item`, `substitution` or `instructions_in_order` |
+| `mismatched_fields` | list or `null` | What differs. Rule names (`price`, `merchant`, `expiry`, `currency`) when `checked_by` is `rules`. Otherwise field names from the mandate and the order, like `item`, `color`, `size`, `model`, `event_date` or `quantity`, plus `extra_item`, `substitution` or `instructions_in_order`. Names that aren't on either are dropped before saving. A `mismatch` left with none becomes `unsure` |
 | `rule_results` | list or `null` | Every hard rule, including the ones that passed. Empty if the rules themselves crashed |
 | `latency_ms` | int or `null` | How long the whole check took |
 | `checked_by` | `rules`, `ai` | Note: this used to be `claude` |
@@ -268,8 +268,8 @@ A human who approves escalated orders without reading them isn't really reviewin
 
 While it's on, orders are checked in sharp mode:
 
-- **Still always escalated:** any failed hard rule, any `mismatch`, and any check that couldn't run (Claude down or timed out).
-- **Otherwise escalated only if** `risk_score` is 60 or more. Below that, the order is captured and its `reason` says it was let through.
+- **Still always escalated:** any failed hard rule, any `mismatch`, any `unsure`, and any check that couldn't run (Claude down or timed out).
+- **A `match` is escalated only if** `risk_score` is 60 or more, instead of the usual 30. Below that, the order is captured and its `reason` says it was let through.
 - **Reasons are sharper:** "Mandate said black, order has olive", so the next look is a real one.
 
 The watch is global, not per shopper.
