@@ -15,7 +15,7 @@ There are four kinds of caller. Sending the wrong credential, or none, returns `
 | Merchant scripts | `X-API-Key: <MERCHANT_API_KEY>` | The same as the dashboard |
 | Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject` |
 
-A credential only works on its own row. The agent key can't read orders, and a dashboard session can't call `POST /orders`. Its one way to place an order is `POST /demo/orders`, which only builds the four fixed demo scenarios.
+A credential only works on its own row. The agent key can't read orders, and a dashboard session can't call `POST /orders`. Its one way to place an order is `POST /demo/orders`, which only builds the fixed demo scenarios.
 
 `GET /health` and `POST /auth/session` need nothing.
 
@@ -102,6 +102,8 @@ Review links only work when `status` is `authorized` and `review_state` is `need
       "name": "Trail runner",
       "color": "red",
       "size": "women's 9",
+      "model": null,
+      "event_date": null,
       "quantity": 1,
       "unit_price": "110.00"
     }
@@ -155,6 +157,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 - **Times** are ISO 8601 strings in UTC.
 - **`capture_id`** is set once money is taken. **`void_result`** is PayPal's status, normally `"VOIDED"`, once a hold is released. Both can be `null`.
 - **`shipping_amount`** is `null` on orders from before it was saved.
+- **Item `model` and `event_date`** are optional. `event_date` is a date like `"2026-12-05"`. Orders from before they existed don't have the keys at all, so treat missing the same as `null`.
 - **`merchant`** is `null` for an order at Fernwood Supply Co, which is every agent order. Only `POST /demo/orders` sets it.
 - **`max_price`** can be in another currency, so don't hardcode `$`. Read `mandate.rules.currency`. If that's `null`, treat it as USD.
 - **`max_price_inclusive`**: `true` means "up to" and `false` means "under".
@@ -504,6 +507,13 @@ Merchant only. Builds an order from a mandate's rules and runs it through the sa
 | `wrong_color` | The same, with a different color | No item, or no color |
 | `over_cap` | The same, about 15% over the cap | No item, or no cap |
 | `wrong_store` | The same, at a different fictional store | No item, or no store |
+| `wrong_size` | The same, in the nearest other size the catalog stocks (9 becomes 8.5) | No item, no size, or no other size in the catalog |
+| `substitution` | Another in-stock product from the same catalog category, like almond milk for oat milk | No item, or nothing else in the category |
+| `wrong_model` | The same, the other model at the same catalog price | No item, no model, or no other model in the catalog |
+| `wrong_date` | The same event on the nearest other date in the catalog | No item, no event date, or no other date in the catalog |
+| `wrong_quantity` | One more unit for the same total, so the cap doesn't catch it first | No item, or values that can't make a valid order |
+
+The four catalog scenarios (`wrong_size`, `substitution`, `wrong_model`, `wrong_date`) pick the wrong variant from the store's catalog, found by the mandate's `rules.category`: `sneakers`, `groceries`, `electronics`, `event tickets` or `subscription`. A mandate in any other category gets a `422` for those four.
 
 Success is a `201` with the order object plus `decisions` and `approvals`, like `GET /orders/{id}`. The verdict, risk score and reason are in `intent_check`, which can be `null`. "Needs review" is `review_state`, not `status`: that order has `status: "authorized"` and `review_state: "needs_review"`.
 

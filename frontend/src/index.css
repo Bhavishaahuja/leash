@@ -936,9 +936,10 @@ p {
   cursor: default;
 }
 
+/* nine scenarios, a 3 by 3 block. two columns on a phone, see the 640px query */
 .scenario-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -1039,6 +1040,10 @@ p {
 @media (max-width: 640px) {
   .topbar__store {
     display: none;
+  }
+
+  .scenario-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   /* brand, two links and the sample data flag have to share 390px */

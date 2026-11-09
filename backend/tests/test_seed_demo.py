@@ -174,13 +174,34 @@ def result_for(results, name):
 # ---- the scenarios themselves ----
 
 
-def test_five_clean_and_six_sneaky():
+def test_ten_clean_and_seven_sneaky():
     expected_states = []
     for scenario in seed_demo.SCENARIOS:
         expected_states.append(scenario["expected"])
 
-    assert expected_states.count("auto_approved") == 5
-    assert expected_states.count("needs_review") == 6
+    assert expected_states.count("auto_approved") == 10
+    assert expected_states.count("needs_review") == 7
+
+
+def scenario_named(name):
+    for scenario in seed_demo.SCENARIOS:
+        if scenario["name"] == name:
+            return scenario
+    raise AssertionError("no scenario " + name)
+
+
+def test_one_clean_mandate_per_catalog_category():
+    # these are the mandates /place-order breaks on camera, one per catalog category
+    names = ["clean: white sneakers", "clean: oat milk", "clean: earbuds",
+             "clean: market tickets", "clean: pantry box"]
+    for name in names:
+        assert scenario_named(name)["expected"] == "auto_approved"
+
+    earbuds = scenario_named("clean: earbuds")["items"][0]
+    assert earbuds["model"] == "FP-200"
+    tickets = scenario_named("clean: market tickets")["items"][0]
+    assert tickets["event_date"] == "2026-12-05"
+    assert tickets["quantity"] == 2
 
 
 def test_scenarios_are_all_at_the_fictional_stores():
@@ -205,14 +226,43 @@ def test_each_sneaky_scenario_is_caught_for_its_own_reason(api, capsys):
     assert injection["reason"] == "Order text tried to instruct the checker"
 
 
+def test_twelve_at_full_price_is_stopped_by_the_price_cap(api, claude, capsys):
+    # a year of the plan at the catalog's $29, against "one month, max $35". the price rule has to
+    # catch it on its own, before Claude ever gets asked about the quantity
+    scenario = scenario_named("sneaky: 12 at full price")
+    assert scenario["items"][0]["quantity"] == 12
+    assert scenario["items"][0]["unit_price"] == "29.00"
+
+    results = seed_demo.run_seed(api, VAULT_ID, [scenario])
+
+    assert seed_demo.print_results(results) == 0
+    order = results[0]["order"]
+    assert order["total"] == "348.00"
+    assert order["status"] == "authorized"
+    check = order["intent_check"]
+    assert check["checked_by"] == "rules"
+    assert check["mismatched_fields"] == ["price"]
+    assert check["reason"] == "Order is $348.00, mandate cap is $35.00"
+
+
+def test_catalog_items_keep_their_model_and_date(api, capsys):
+    scenarios = [scenario_named("clean: earbuds"), scenario_named("clean: market tickets")]
+
+    results = seed_demo.run_seed(api, VAULT_ID, scenarios)
+
+    assert seed_demo.print_results(results) == 0
+    assert results[0]["order"]["items"][0]["model"] == "FP-200"
+    assert results[1]["order"]["items"][0]["event_date"] == "2026-12-05"
+
+
 # ---- seeding ----
 
 
 def test_clean_orders_capture_and_sneaky_ones_wait(api, paypal, capsys):
     results = seed_demo.run_seed(api, VAULT_ID)
 
-    assert len(paypal.captured) == 5
-    assert paypal.created == 11
+    assert len(paypal.captured) == 10
+    assert paypal.created == 17
     for result in results:
         assert result["order"]["review_state"] == result["scenario"]["expected"]
         assert result["created"] is True
@@ -239,8 +289,8 @@ def test_table_shows_every_scenario_and_the_links(api, capsys):
         assert scenario["name"] in output
     for heading in ["SCENARIO", "EXPECTED", "ACTUAL", "RISK", "REASON"]:
         assert heading in output
-    assert output.count("/review/") == 6
-    assert "11 of 11 as expected" in output
+    assert output.count("/review/") == 7
+    assert "17 of 17 as expected" in output
 
 
 def test_running_it_again_makes_no_duplicates(api, paypal, sessions, capsys):
@@ -249,11 +299,11 @@ def test_running_it_again_makes_no_duplicates(api, paypal, sessions, capsys):
     results = seed_demo.run_seed(api, VAULT_ID)
 
     assert seed_demo.print_results(results) == 0
-    assert paypal.created == 11
-    assert len(paypal.captured) == 5
+    assert paypal.created == 17
+    assert len(paypal.captured) == 10
     with sessions() as session:
-        assert session.query(Order).count() == 11
-        assert session.query(Mandate).count() == 11
+        assert session.query(Order).count() == 17
+        assert session.query(Mandate).count() == 17
     for result in results:
         assert result["created"] is False
 
@@ -274,7 +324,7 @@ def test_a_partial_run_only_fills_in_whats_missing(api, paypal, capsys):
 
     results = seed_demo.run_seed(api, VAULT_ID)
 
-    assert paypal.created == 11
+    assert paypal.created == 17
     assert seed_demo.print_results(results) == 0
 
 
@@ -306,7 +356,7 @@ def test_wrong_outcome_exits_non_zero(api, claude, capsys):
 
 def test_right_state_for_the_wrong_reason_exits_non_zero(api, capsys):
     # still needs_review, but not because of what the scenario is meant to show
-    broken = dict(seed_demo.SCENARIOS[6])
+    broken = dict(scenario_named("sneaky: over the cap"))
     broken["reason_contains"] = "something it won't say"
 
     results = seed_demo.run_seed(api, VAULT_ID, [broken])
@@ -332,8 +382,8 @@ def test_reset_voids_open_holds_then_deletes_everything(api, paypal, sessions, c
 
     seed_demo.run_reset(api)
 
-    # the 6 that were waiting. the 5 clean ones were captured, nothing to void
-    assert len(paypal.voided) == 6
+    # the 7 that were waiting. the 10 clean ones were captured, nothing to void
+    assert len(paypal.voided) == 7
     with sessions() as session:
         assert session.query(Order).count() == 0
         assert session.query(Mandate).count() == 0
@@ -370,7 +420,7 @@ def test_can_seed_again_after_a_reset(api, paypal, capsys):
 
     results = seed_demo.run_seed(api, VAULT_ID)
 
-    assert paypal.created == 22
+    assert paypal.created == 34
     assert seed_demo.print_results(results) == 0
 
 
@@ -382,9 +432,9 @@ def test_failed_void_keeps_the_rows_so_the_hold_isnt_forgotten(api, paypal, sess
         seed_demo.run_reset(api)
 
     with sessions() as session:
-        assert session.query(Order).count() == 11
+        assert session.query(Order).count() == 17
         open_holds = session.query(Order).filter_by(status=OrderStatus.authorized).count()
-        assert open_holds == 6
+        assert open_holds == 7
 
 
 def test_reset_leaves_other_orders_alone(api, http, sessions, capsys):
@@ -406,7 +456,8 @@ def test_reset_leaves_other_orders_alone(api, http, sessions, capsys):
 
 
 def test_delete_refuses_while_a_hold_is_open_and_says_which(api, http, capsys):
-    results = seed_demo.run_seed(api, VAULT_ID, seed_demo.SCENARIOS[5:7])
+    scenarios = [scenario_named("sneaky: wrong color"), scenario_named("sneaky: over the cap")]
+    results = seed_demo.run_seed(api, VAULT_ID, scenarios)
 
     response = http.delete("/demo/seeded", headers=MERCHANT_HEADERS)
 
@@ -416,7 +467,7 @@ def test_delete_refuses_while_a_hold_is_open_and_says_which(api, http, capsys):
 
 
 def test_expired_hold_doesnt_block_deleting(api, http, sessions, capsys):
-    seed_demo.run_seed(api, VAULT_ID, seed_demo.SCENARIOS[5:6])
+    seed_demo.run_seed(api, VAULT_ID, [scenario_named("sneaky: wrong color")])
     with sessions() as session:
         order = session.query(Order).one()
         order.authorization_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)

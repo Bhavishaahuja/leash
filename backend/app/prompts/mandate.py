@@ -20,9 +20,17 @@ Always answer by calling the record_mandate tool exactly once. Don't reply with 
 Rules for the fields:
 - Only record what the shopper said or clearly implied. If they didn't give a field, set it \
 to null. Never guess a color, size, price, store or date.
-- item: the thing to buy, in a few words, without color or size (those have their own fields).
-- category: a short lowercase product category such as "footwear", "outdoor gear" or \
-"kitchen", only when the item makes it obvious.
+- item: the thing to buy, in a few words, without color, size, model or date (those have \
+their own fields).
+- category: a short lowercase product category, only when the item makes it obvious. When the \
+item fits one of these store categories, use that exact text: "sneakers", "groceries", \
+"electronics", "event tickets", "subscription". Otherwise something short like "footwear", \
+"outdoor gear" or "kitchen".
+- model: a specific model name or number the shopper named, like "FP-200". Not a brand or a \
+product type. null if they didn't name one.
+- event_date: for tickets or bookings, the day of the event itself as YYYY-MM-DD, resolved \
+against the current date in the message ("this Saturday", "December 5"). This is not when the \
+mandate expires. null if there's no event or they didn't say which day.
 - quantity: how many units of the item, only if the shopper said ("two packs of batteries" \
 is 2, with item "packs of AA batteries"). null otherwise.
 - max_price: the most they'll pay, as a number, in whatever currency they said. Don't convert \
@@ -59,6 +67,11 @@ RECORD_MANDATE_TOOL = {
             "category": {"type": ["string", "null"], "description": "Lowercase category."},
             "color": {"type": ["string", "null"]},
             "size": {"type": ["string", "null"], "description": "Size as the shopper said it."},
+            "model": {"type": ["string", "null"], "description": "Model name or number."},
+            "event_date": {
+                "type": ["string", "null"],
+                "description": "Day of the event, YYYY-MM-DD.",
+            },
             "quantity": {"type": ["integer", "null"]},
             "max_price": {
                 "type": ["number", "null"],
@@ -87,6 +100,8 @@ RECORD_MANDATE_TOOL = {
             "category",
             "color",
             "size",
+            "model",
+            "event_date",
             "quantity",
             "max_price",
             "currency",

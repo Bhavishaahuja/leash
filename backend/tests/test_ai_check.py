@@ -659,3 +659,20 @@ def test_tool_schema_requires_all_four_fields():
     assert schema["required"] == ["verdict", "risk_score", "reason", "mismatched_fields"]
     assert schema["properties"]["verdict"]["enum"] == ["match", "mismatch", "unsure"]
     assert schema["additionalProperties"] is False
+
+
+def test_model_and_event_date_are_sent_to_the_checker():
+    # without them in parsed_fields Claude only has the raw words to name "model" from
+    mandate = make_mandate("The FP-200 earbuds, and tickets for December 5")
+    mandate.rules["model"] = "FP-200"
+    mandate.rules["event_date"] = "2026-12-05"
+
+    message = intent_prompt.build_user_message(mandate, make_order())
+
+    parsed = message.split("<parsed_fields>")[1].split("</parsed_fields>")[0]
+    assert '"model": "FP-200"' in parsed
+    assert '"event_date": "2026-12-05"' in parsed
+
+
+def test_checker_can_name_model_and_event_date_as_what_differs():
+    assert "model, event_date" in intent_prompt.SYSTEM_PROMPT

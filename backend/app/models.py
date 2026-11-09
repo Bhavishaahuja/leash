@@ -1,12 +1,13 @@
 # the tables Leash needs. field choices follow spikes/README.md (disputes: spike 3)
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
@@ -264,3 +265,26 @@ class Dispute(Base):
     created_at: Mapped[datetime] = created_at_column()
 
     order: Mapped[Order] = relationship()
+
+
+class CatalogItem(Base):
+    # one sellable variant at the demo store: a size and color of a sneaker, one model of earbuds,
+    # one date of an event. the demo scenarios pick a sibling variant from here to get wrong
+    __tablename__ = "catalog_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku: Mapped[str] = mapped_column(String(64), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    # one of the fixed names in catalog.py (CATEGORIES), the parser is told to use the same ones
+    category: Mapped[str] = mapped_column(String(50), index=True)
+    # the variant fields. empty when the product doesn't come in variants of that kind
+    size: Mapped[str | None] = mapped_column(String(50))
+    color: Mapped[str | None] = mapped_column(String(50))
+    model: Mapped[str | None] = mapped_column(String(100))
+    event_date: Mapped[date | None] = mapped_column(Date)
+    # what one unit of quantity means: "pair", "carton", "ticket", "month"
+    quantity_unit: Mapped[str] = mapped_column(String(20))
+    # the list price for one unit
+    price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    in_stock: Mapped[bool] = mapped_column(Boolean, default=True, server_default=true())
+    merchant: Mapped[str] = mapped_column(String(200))

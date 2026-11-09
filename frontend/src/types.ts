@@ -19,12 +19,25 @@ export type ApprovalAction = 'approve' | 'reject'
 // the rubber-stamp watch: sharp while the human has been approving too fast
 export type WatchMode = 'normal' | 'sharp'
 
-export type DemoScenario = 'clean' | 'wrong_color' | 'over_cap' | 'wrong_store'
+export type DemoScenario =
+  | 'clean'
+  | 'wrong_color'
+  | 'over_cap'
+  | 'wrong_store'
+  | 'wrong_size'
+  | 'substitution'
+  | 'wrong_model'
+  | 'wrong_date'
+  | 'wrong_quantity'
 
 export interface OrderItem {
   name: string
   color: string | null
   size: string | null
+  // optional because orders saved before these existed don't have them at all
+  model?: string | null
+  // the day of the event, "2026-12-05"
+  event_date?: string | null
   quantity: number
   unit_price: string
 }

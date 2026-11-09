@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend.app import mandate_parser, mandates
+from backend.app import catalog, mandate_parser, mandates
 from backend.app.db import Base, get_session
 from backend.app.models import Mandate
 from backend.app.prompts import mandate as mandate_prompt
@@ -406,3 +406,43 @@ def test_bad_date_from_model_is_not_stored():
     fields = dict(ALL_NULL)
     fields["expires_at"] = "sometime soon"
     assert mandate_parser.expires_at_datetime(fields) is None
+
+
+def test_model_and_event_date_are_in_the_tool_schema():
+    # strict mode needs every property in required, nullable so "not given" can be said
+    schema = mandate_prompt.RECORD_MANDATE_TOOL["input_schema"]
+
+    for name in ["model", "event_date"]:
+        assert schema["properties"][name]["type"] == ["string", "null"]
+        assert name in schema["required"]
+
+
+def test_the_catalog_categories_are_in_the_prompt():
+    # the demo finds a mandate's catalog rows by these exact words
+    for category in catalog.CATEGORIES:
+        assert '"' + category + '"' in mandate_prompt.SYSTEM_PROMPT
+
+
+def test_model_and_event_date_reach_the_rules(db_sessions):
+    fields = dict(ALL_NULL)
+    fields["item"] = "Fall Makers Market tickets"
+    fields["category"] = "event tickets"
+    fields["model"] = None
+    fields["event_date"] = "2026-12-05"
+    fields["quantity"] = 2
+    client = make_app(db_sessions, FakeAnthropic([tool_call(fields)]))
+
+    response = client.post(
+        "/mandates", json={"buyer_label": "Sam", "request_text": "Two tickets for December 5"}
+    )
+
+    assert response.status_code == 201
+    assert response.json()["rules"]["event_date"] == "2026-12-05"
+    assert response.json()["rules"]["model"] is None
+
+
+def test_blank_model_is_not_given():
+    fields = dict(ALL_NULL)
+    fields["model"] = "   "
+
+    assert mandate_parser.clean_fields(fields)["model"] is None

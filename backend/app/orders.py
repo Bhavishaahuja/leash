@@ -25,7 +25,7 @@
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 from typing import Annotated
@@ -90,6 +90,10 @@ class OrderItemIn(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     color: str | None = Field(default=None, max_length=100)
     size: str | None = Field(default=None, max_length=100)
+    # which model, like "FP-200". its own field so the check can name it as what differs
+    model: str | None = Field(default=None, max_length=100)
+    # the day of the event, for tickets and bookings. "2026-12-05"
+    event_date: date | None = None
     quantity: int = Field(ge=1, le=1000)
     unit_price: Decimal = Field(gt=0, max_digits=10, decimal_places=2)
 
@@ -246,7 +250,16 @@ def item_display_name(item):
             parts.append(size)
         else:
             parts.append("size " + size)
+    if item.model:
+        parts.append("model " + item.model.strip())
+    if item.event_date:
+        parts.append(format_event_date(item.event_date))
     return ", ".join(parts)
+
+
+def format_event_date(event_date):
+    # "Dec 5, 2026". built by hand because %-d doesn't exist on Windows
+    return event_date.strftime("%b") + " " + str(event_date.day) + ", " + str(event_date.year)
 
 
 def build_paypal_order(order_id, items, shipping, vault_id, settings):
@@ -628,6 +641,8 @@ def place_order(session, mandate, items, shipping, vault_id, paypal, claude, mer
             "name": item.name,
             "color": item.color,
             "size": item.size,
+            "model": item.model,
+            "event_date": item.event_date.isoformat() if item.event_date else None,
             "quantity": item.quantity,
             "unit_price": money(item.unit_price),
         })

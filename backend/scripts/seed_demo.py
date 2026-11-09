@@ -1,7 +1,9 @@
 # seed_demo.py
 # Fills a running Leash API with demo orders, all through its own API and all real in the PayPal
 # sandbox: mandates and orders with the agent key, review links with the merchant key.
-#   5 clean orders that should auto-capture, and 6 sneaky ones that should stop for a human.
+#   10 clean orders that should auto-capture, and 7 sneaky ones that should stop for a human.
+#   Five of the clean ones are one per catalog category (sneakers, groceries, electronics, event
+#   tickets, subscription), and their mandates are the ones /place-order breaks on camera.
 #
 # Run from the repo root, in cmd:
 #   .venv\Scripts\python.exe backend\scripts\seed_demo.py                 local API on :8000
@@ -45,11 +47,14 @@ NEEDS_REVIEW = "needs_review"
 
 RUNNERS_REQUEST = "Black trail runners, women's size 9, up to $120, from Fernwood Supply Co."
 MUG_REQUEST = "One stainless steel camping mug, up to $40, from Fernwood Supply Co."
+PANTRY_REQUEST = (
+    "Sign me up for one month of the Pantry Box monthly plan from Fernwood Supply Co, max $35."
+)
 
 
-def item(name, unit_price, color=None, size=None, quantity=1):
-    return {"name": name, "color": color, "size": size, "quantity": quantity,
-            "unit_price": unit_price}
+def item(name, unit_price, color=None, size=None, quantity=1, model=None, event_date=None):
+    return {"name": name, "color": color, "size": size, "model": model,
+            "event_date": event_date, "quantity": quantity, "unit_price": unit_price}
 
 
 # reason_contains is for the outcomes with exact wording: the hard rules, and the injection reason.
@@ -88,6 +93,46 @@ SCENARIOS = [
         "request": "Three pairs of wool hiking socks, size L, up to $45, from Fernwood Supply Co.",
         "items": [item("Wool hiking socks", "11.00", size="L", quantity=3)],
         "shipping": "6.00",
+        "expected": AUTO_APPROVED,
+    },
+    # one per catalog category, at the catalog's price. the five catalog scenarios on
+    # /place-order start from these mandates
+    {
+        "name": "clean: white sneakers",
+        "request": "White canvas sneakers in a size 9, nothing over $80, from Fernwood Supply Co.",
+        "items": [item("Canvas low-top sneaker", "64.00", "white", "9")],
+        "shipping": "6.00",
+        "expected": AUTO_APPROVED,
+    },
+    {
+        "name": "clean: oat milk",
+        "request": "Grab a 64 oz carton of organic oat milk from Fernwood Supply Co, under $8. "
+        "If they're out, just skip it, don't swap in something else.",
+        "items": [item("Organic oat milk", "4.99", size="64 oz")],
+        "shipping": "2.00",
+        "expected": AUTO_APPROVED,
+    },
+    {
+        "name": "clean: earbuds",
+        "request": "Get me the FP-200 wireless earbuds from Fernwood Supply Co, up to $90.",
+        "items": [item("Wireless earbuds", "79.00", model="FP-200")],
+        "shipping": "0.00",
+        "expected": AUTO_APPROVED,
+    },
+    {
+        "name": "clean: market tickets",
+        "request": "Two general admission tickets to the Fall Makers Market on Saturday, "
+        "December 5, 2026, under $60 total, from Fernwood Supply Co.",
+        "items": [item("Fall Makers Market general admission", "25.00", quantity=2,
+                       event_date="2026-12-05")],
+        "shipping": "0.00",
+        "expected": AUTO_APPROVED,
+    },
+    {
+        "name": "clean: pantry box",
+        "request": PANTRY_REQUEST,
+        "items": [item("Pantry Box monthly plan", "29.00")],
+        "shipping": "0.00",
         "expected": AUTO_APPROVED,
     },
     {
@@ -130,6 +175,16 @@ SCENARIOS = [
         "shipping": "4.00",
         "expected": NEEDS_REVIEW,
         "mismatched_field": "quantity",
+    },
+    {
+        # a year of the plan at the catalog's full monthly price, against a one-month mandate.
+        # the total is way past the cap, so the price rule stops it before Claude is asked
+        "name": "sneaky: 12 at full price",
+        "request": PANTRY_REQUEST,
+        "items": [item("Pantry Box monthly plan", "29.00", quantity=12)],
+        "shipping": "0.00",
+        "expected": NEEDS_REVIEW,
+        "reason_contains": "Order is $348.00, mandate cap is $35.00",
     },
     {
         "name": "sneaky: injection in name",

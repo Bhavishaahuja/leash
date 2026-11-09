@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import delete, select
 
+from backend.app import catalog
 from backend.app.auth import require_merchant
 from backend.app.config import STORE_NAME, get_settings
 from backend.app.intent.rules import normalize_merchant
@@ -53,6 +54,13 @@ class DemoScenario(str, enum.Enum):
     wrong_color = "wrong_color"
     over_cap = "over_cap"
     wrong_store = "wrong_store"
+    # these five pick their wrong variant from the catalog, see catalog.py
+    wrong_size = "wrong_size"
+    substitution = "substitution"
+    wrong_model = "wrong_model"
+    wrong_date = "wrong_date"
+    # no catalog needed: one more unit for the same money
+    wrong_quantity = "wrong_quantity"
 
 
 class DemoOrderCreate(BaseModel):
@@ -73,9 +81,13 @@ class ScenarioNotPossible(Exception):
     pass
 
 
-def build_demo_order(mandate, scenario):
+def build_demo_order(mandate, scenario, catalog_rows=None):
     # no database and no PayPal in here, just the mandate's rules turned into an order. each
-    # scenario starts from the same matching order and breaks exactly one thing
+    # scenario starts from the same matching order and breaks exactly one thing.
+    # catalog_rows is the catalog for the mandate's category (catalog.load_category), the
+    # scenarios that need a real sibling variant pick it from there
+    if catalog_rows is None:
+        catalog_rows = []
     rules = mandate.rules
     # checked first, every scenario needs it. a placeholder name can't be checked against anything,
     # so Claude says unsure and even a clean order can never auto-capture
@@ -84,6 +96,9 @@ def build_demo_order(mandate, scenario):
         raise ScenarioNotPossible("This mandate doesn't name an item to order")
 
     color = rules.get("color")
+    size = rules.get("size")
+    model = rules.get("model")
+    event_date = catalog.parse_event_date(rules.get("event_date"))
     # same fallback as the parser: a shopper who didn't say how many wants one
     quantity = rules.get("quantity") or 1
     merchant = mandate.merchant
@@ -104,6 +119,40 @@ def build_demo_order(mandate, scenario):
         if not merchant:
             raise ScenarioNotPossible("This mandate doesn't name a store, so any store is fine")
         merchant = different_store(merchant)
+    elif scenario == DemoScenario.wrong_size:
+        if not size:
+            raise ScenarioNotPossible("This mandate doesn't name a size to get wrong")
+        require_catalog(catalog_rows)
+        size = catalog.other_size(catalog_rows, size)
+        if size is None:
+            raise ScenarioNotPossible("The catalog has no other size of this")
+    elif scenario == DemoScenario.substitution:
+        require_catalog(catalog_rows)
+        substitute = catalog.substitute_for(catalog_rows, item_name)
+        if substitute is None:
+            raise ScenarioNotPossible("The catalog has nothing else in this category to swap in")
+        item_name = substitute.name
+    elif scenario == DemoScenario.wrong_model:
+        if not model:
+            raise ScenarioNotPossible("This mandate doesn't name a model to get wrong")
+        require_catalog(catalog_rows)
+        model = catalog.other_model(catalog_rows, model)
+        if model is None:
+            raise ScenarioNotPossible("The catalog has no other model of this")
+    elif scenario == DemoScenario.wrong_date:
+        if event_date is None:
+            raise ScenarioNotPossible("This mandate doesn't name an event date to get wrong")
+        require_catalog(catalog_rows)
+        event_date = catalog.other_event_date(catalog_rows, event_date)
+        if event_date is None:
+            raise ScenarioNotPossible("The catalog has no other date for this event")
+    elif scenario == DemoScenario.wrong_quantity:
+        # the same money as the clean order spread over one more unit. a total that grew would
+        # trip the price cap first, and then this would be testing the rule and not Claude.
+        # one more and not a dozen, so the unit price still looks like a real price on camera
+        clean_unit_price = (target_total / quantity).quantize(CENT, rounding=ROUND_DOWN)
+        target_total = clean_unit_price * quantity
+        quantity += 1
 
     unit_price = (target_total / quantity).quantize(CENT, rounding=rounding)
     try:
@@ -113,7 +162,9 @@ def build_demo_order(mandate, scenario):
         item = OrderItemIn(
             name=item_name,
             color=color,
-            size=rules.get("size"),
+            size=size,
+            model=model,
+            event_date=event_date,
             quantity=quantity,
             unit_price=unit_price,
         )
@@ -122,6 +173,13 @@ def build_demo_order(mandate, scenario):
         raise ScenarioNotPossible("This mandate's values can't make a valid order") from error
 
     return DemoOrder(items=[item], shipping=DEMO_SHIPPING, merchant=merchant)
+
+
+def require_catalog(catalog_rows):
+    # the mandate's category isn't one the store sells (or the parser didn't give one), so there's
+    # no real sibling variant to pick
+    if not catalog_rows:
+        raise ScenarioNotPossible("This mandate isn't for anything in the store's catalog")
 
 
 def product_name(item):
@@ -171,8 +229,9 @@ def create_demo_order(body: DemoOrderCreate, session: DbSession, paypal: PayPal,
             status_code=404, detail="Mandate " + str(body.mandate_id) + " not found"
         )
 
+    catalog_rows = catalog.load_category(session, mandate.rules.get("category"))
     try:
-        demo_order = build_demo_order(mandate, body.scenario)
+        demo_order = build_demo_order(mandate, body.scenario, catalog_rows)
     except ScenarioNotPossible as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

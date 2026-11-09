@@ -36,7 +36,29 @@ export function describeItem(item: OrderItem): string {
   if (item.size) {
     parts.push(sizeLabel(item.size))
   }
+  if (item.model) {
+    parts.push('model ' + item.model)
+  }
+  if (item.event_date) {
+    parts.push(formatEventDate(item.event_date))
+  }
   return parts.join(', ')
+}
+
+const eventDateFormatter = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+})
+
+export function formatEventDate(isoDate: string): string {
+  // "2026-12-05" -> "Dec 5, 2026". built from the parts, because new Date("2026-12-05") is
+  // midnight UTC and shows as Dec 4 anywhere west of London
+  const [year, month, day] = isoDate.split('-').map(Number)
+  if (!year || !month || !day) {
+    return isoDate
+  }
+  return eventDateFormatter.format(new Date(year, month - 1, day))
 }
 
 function sizeLabel(size: string): string {
