@@ -3,6 +3,7 @@
 import pytest
 
 from backend.app.config import get_settings
+from backend.app.demo import reset_limiter
 from backend.app.session import login_limiter
 from keyed_client import AGENT_KEY, DEMO_PASSWORD, MERCHANT_KEY
 
@@ -17,5 +18,7 @@ def api_keys(monkeypatch):
     monkeypatch.setenv("DEMO_MERCHANT_PASSWORD", DEMO_PASSWORD)
     get_settings.cache_clear()
     login_limiter.reset()
+    # every test client shares one address, so one test's resets would count against the next
+    reset_limiter.reset()
     yield
     get_settings.cache_clear()

@@ -1,34 +1,50 @@
 # Demo support. Two separate things live here:
 #   POST /demo/orders builds an order from a mandate's rules, right or wrong on purpose, and sends
 #   it down the same path as an agent's order. It's what the /place-order page calls.
-#   DELETE /demo/seeded supports backend/scripts/seed_demo.py, which has to work against Render with
-#   only a base URL. Seeded rows are the ones whose mandate has a buyer_label starting with
-#   SEED_LABEL_PREFIX.
+#   POST /demo/reset wipes what backend/scripts/seed_demo.py made: voids the open holds at PayPal,
+#   then deletes the rows. The dashboard can call it, and the script's --reset calls it too, so
+#   both go through reset_seeded_demo. DELETE /demo/seeded is the delete half on its own.
+#   Seeded rows are the ones whose mandate has a buyer_label starting with SEED_LABEL_PREFIX.
 
 import enum
 from dataclasses import dataclass
 from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import delete, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app import catalog
 from backend.app.auth import require_merchant
 from backend.app.config import STORE_NAME, get_settings
 from backend.app.intent.rules import normalize_merchant
-from backend.app.models import Approval, Decision, Dispute, Mandate, Order, OrderStatus
+from backend.app.models import (
+    Approval,
+    Decision,
+    Dispute,
+    Mandate,
+    Order,
+    OrderStatus,
+    ReviewState,
+)
 from backend.app.orders import (
     CENT,
+    PAYPAL_FAILURES,
+    VOID,
     Claude,
     DbSession,
     OrderDetail,
     OrderItemIn,
     PayPal,
+    claim_order,
     load_order,
+    payment_request_id,
     place_order,
+    release_claim,
 )
 from backend.app.review import hold_has_expired
+from backend.app.session import RateLimiter, client_address
 
 # the part after the colon names the scenario, which is how a re-run finds what's already there
 SEED_LABEL_PREFIX = "seed-demo:"
@@ -45,6 +61,12 @@ DEMO_SHIPPING = Decimal("0.00")
 OTHER_STORE_NAME = "Ridgeline Outdoors"
 # first one that doesn't appear in the mandate's color wins
 WRONG_COLORS = ["red", "green", "orange"]
+
+# POST /demo/reset per address. enough to reset, look, and reset again, not enough to hammer
+# PayPal with voids. per process and in memory, like the login limit
+RESET_MAX_TRIES = 3
+RESET_WINDOW_SECONDS = 60
+reset_limiter = RateLimiter(RESET_MAX_TRIES, RESET_WINDOW_SECONDS)
 
 # who a /place-order order is credited to. the merchant placed it, standing in for an agent, so it
 # gets its own name instead of borrowing a real agent's
@@ -257,14 +279,88 @@ def create_demo_order(body: DemoOrderCreate, session: DbSession, paypal: PayPal,
     return load_order(session, order_id)
 
 
-@router.delete("/seeded", dependencies=[Depends(require_merchant)])
-def delete_seeded(session: DbSession):
-    # refuses while any seeded hold is still open, so deleting the row can't leave an authorization
-    # at PayPal that nothing knows about. the 409 lists them so the script can void them first.
-    # captures stay at PayPal, this only forgets them here
-    mandate_query = select(Mandate.id).where(Mandate.buyer_label.like(SEED_LABEL_PREFIX + "%"))
-    mandate_ids = list(session.scalars(mandate_query).all())
+class ResetSummary(BaseModel):
+    # what POST /demo/reset did
+    voided_holds: int
+    # so the merchant can match them up with PayPal's records
+    voided_order_ids: list[int]
+    deleted_orders: int
+    deleted_mandates: int
+    # forgotten here only. a dispute stays open at PayPal
+    deleted_disputes: int
 
+
+class ResetBlocked(Exception):
+    # the reset stopped partway. nothing that's still on hold at PayPal has been deleted
+    def __init__(self, status_code, detail):
+        super().__init__(str(detail))
+        self.status_code = status_code
+        self.detail = detail
+
+
+def seeded_mandate_ids(session):
+    query = select(Mandate.id).where(Mandate.buyer_label.like(SEED_LABEL_PREFIX + "%"))
+    return list(session.scalars(query).all())
+
+
+def open_seeded_hold_ids(session):
+    # seeded orders with money on hold at PayPal right now. an expired hold has nothing to void
+    query = select(Order).where(Order.mandate_id.in_(seeded_mandate_ids(session)))
+    open_ids = []
+    for order in session.scalars(query).all():
+        if order.status == OrderStatus.authorized and not hold_has_expired(order):
+            open_ids.append(order.id)
+    session.rollback()
+    return open_ids
+
+
+def void_seeded_hold(session, paypal, order_id):
+    # the same steps as rejecting from a review link: claim it so a human tapping approve right
+    # now can't capture it as well, void with the derived PayPal-Request-Id so a retry can't
+    # double up, then save. no approval row, nobody actually reviewed it
+    order, blocker = claim_order(session, order_id)
+    if blocker is not None:
+        session.rollback()
+        raise ResetBlocked(409, {
+            "message": "Order " + str(order_id) + " is being decided right now, try again",
+            "order_id": order_id,
+        })
+
+    try:
+        voided = paypal.void_authorization(
+            order.authorization_id, request_id=payment_request_id(order, VOID)
+        )
+    except PAYPAL_FAILURES as error:
+        release_claim(session, order_id)
+        raise ResetBlocked(502, {
+            "message": "PayPal couldn't void order " + str(order_id)
+            + ". Nothing was deleted, try again",
+            "order_id": order_id,
+        }) from error
+
+    try:
+        order = load_order(session, order_id, lock=True)
+        order.status = OrderStatus.voided
+        order.review_state = ReviewState.rejected
+        # a 204 with no body is also a documented success
+        order.void_result = voided.get("status") if voided else "VOIDED"
+        order.payment_claimed_at = None
+        session.commit()
+    except SQLAlchemyError as error:
+        # voided at PayPal, not saved here. the claim expires and a retry gets PayPal's same
+        # answer back for the same request id, so running the reset again sorts it out
+        session.rollback()
+        raise ResetBlocked(502, {
+            "message": "Order " + str(order_id) + " was voided but saving that failed, try again",
+            "order_id": order_id,
+        }) from error
+
+
+def delete_seeded_rows(session):
+    # refuses while any seeded hold is still open, so deleting the row can't leave an authorization
+    # at PayPal that nothing knows about. captures stay at PayPal, this only forgets them here.
+    # returns (orders, mandates, disputes) deleted
+    mandate_ids = seeded_mandate_ids(session)
     order_query = select(Order).where(Order.mandate_id.in_(mandate_ids)).with_for_update()
     orders = session.scalars(order_query).all()
 
@@ -277,13 +373,10 @@ def delete_seeded(session: DbSession):
 
     if open_order_ids:
         session.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "message": "Void the open holds on these orders first",
-                "open_order_ids": open_order_ids,
-            },
-        )
+        raise ResetBlocked(409, {
+            "message": "Void the open holds on these orders first",
+            "open_order_ids": open_order_ids,
+        })
 
     # a dispute points at its order, so it has to go first or Postgres refuses the order delete.
     # same deal as captures: the dispute stays at PayPal, this only forgets it here
@@ -295,8 +388,56 @@ def delete_seeded(session: DbSession):
     session.execute(delete(Order).where(Order.id.in_(order_ids)))
     session.execute(delete(Mandate).where(Mandate.id.in_(mandate_ids)))
     session.commit()
+    return len(order_ids), len(mandate_ids), deleted_disputes
+
+
+def reset_seeded_demo(session, paypal):
+    # void every open seeded hold, then delete every seeded row. the first void that fails stops
+    # it with the rows still there, so a hold is never forgotten while it still holds money.
+    # what got voided before that stays voided, and running it again picks up where it stopped
+    voided_order_ids = []
+    for order_id in open_seeded_hold_ids(session):
+        void_seeded_hold(session, paypal, order_id)
+        voided_order_ids.append(order_id)
+
+    # an order placed against a seeded mandate in the meantime makes this a 409, and that's fine:
+    # it's a new hold, the next reset voids it
+    deleted_orders, deleted_mandates, deleted_disputes = delete_seeded_rows(session)
+    return ResetSummary(
+        voided_holds=len(voided_order_ids),
+        voided_order_ids=voided_order_ids,
+        deleted_orders=deleted_orders,
+        deleted_mandates=deleted_mandates,
+        deleted_disputes=deleted_disputes,
+    )
+
+
+@router.post("/reset", response_model=ResetSummary, dependencies=[Depends(require_merchant)])
+def reset_demo(request: Request, session: DbSession, paypal: PayPal):
+    # counted after the auth check, so only someone logged in can use up the allowance
+    wait = reset_limiter.seconds_until_allowed(client_address(request))
+    if wait > 0:
+        raise HTTPException(
+            status_code=429,
+            detail="The demo was just reset, try again in a minute",
+            headers={"Retry-After": str(int(wait) + 1)},
+        )
+
+    try:
+        return reset_seeded_demo(session, paypal)
+    except ResetBlocked as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+
+
+@router.delete("/seeded", dependencies=[Depends(require_merchant)])
+def delete_seeded(session: DbSession):
+    # just the delete half of a reset: a 409 listing the open holds if there are any
+    try:
+        deleted_orders, deleted_mandates, deleted_disputes = delete_seeded_rows(session)
+    except ResetBlocked as error:
+        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
     return {
-        "deleted_orders": len(order_ids),
-        "deleted_mandates": len(mandate_ids),
+        "deleted_orders": deleted_orders,
+        "deleted_mandates": deleted_mandates,
         "deleted_disputes": deleted_disputes,
     }

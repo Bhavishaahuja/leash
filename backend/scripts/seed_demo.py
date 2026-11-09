@@ -378,22 +378,19 @@ def print_results(results):
 
 
 def run_reset(api):
-    # void anything still on hold first, through the normal review link so PayPal really gets told,
-    # and only then delete. if a void fails the rows stay, so that hold isn't forgotten
-    response = api.call("DELETE", "/demo/seeded", api.merchant, ok=(200, 409))
-    if response.status_code == 409:
-        open_order_ids = response.json()["detail"]["open_order_ids"]
-        print("Voiding " + str(len(open_order_ids)) + " open holds...")
-        for order_id in open_order_ids:
-            token = api.review_token(order_id)
-            api.call("POST", "/review/" + token + "/reject")
-            print("  order " + str(order_id) + " voided")
-        response = api.call("DELETE", "/demo/seeded", api.merchant)
-    deleted = response.json()
-    print("Deleted " + str(deleted["deleted_orders"]) + " orders and "
-          + str(deleted["deleted_mandates"]) + " mandates.")
-    # .get: an API from before this change doesn't send the count
-    deleted_disputes = deleted.get("deleted_disputes", 0)
+    # POST /demo/reset does the whole thing on the server, the same function the dashboard's reset
+    # runs: void every open hold at PayPal, then delete. if a void fails it stops with the rows
+    # still there, so that hold isn't forgotten, and this raises ApiError with PayPal's problem
+    summary = api.call("POST", "/demo/reset", api.merchant).json()
+    if summary["voided_holds"]:
+        voided = []
+        for order_id in summary["voided_order_ids"]:
+            voided.append(str(order_id))
+        print("Voided " + str(summary["voided_holds"]) + " open holds (orders "
+              + ", ".join(voided) + ").")
+    print("Deleted " + str(summary["deleted_orders"]) + " orders and "
+          + str(summary["deleted_mandates"]) + " mandates.")
+    deleted_disputes = summary["deleted_disputes"]
     if deleted_disputes:
         print("Also forgot " + str(deleted_disputes) + " disputes on those orders. They're still "
               "open at PayPal, answer them in the Resolution Center if you need to.")

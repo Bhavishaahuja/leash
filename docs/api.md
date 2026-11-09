@@ -11,7 +11,7 @@ There are four kinds of caller. Sending the wrong credential, or none, returns `
 | Caller | Sends | Can reach |
 |---|---|---|
 | Shopping agent | `X-API-Key: <its key from AGENT_API_KEYS>` | `POST /mandates`, `POST /orders`, `POST /orders/{id}/authorize`, `GET /agent/orders/{id}` |
-| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `GET /stats`, `POST /orders/{id}/review-link`, `POST /demo/orders`, every `/disputes` route |
+| Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `GET /stats`, `POST /orders/{id}/review-link`, `POST /demo/orders`, `POST /demo/reset`, every `/disputes` route |
 | Merchant scripts | `X-API-Key: <MERCHANT_API_KEY>` | The same as the dashboard |
 | Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject` |
 
@@ -528,9 +528,33 @@ Success is a `201` with the order object plus `decisions` and `approvals`, like 
 | `502` | PayPal failed, same as `POST /orders` |
 | `503` | `DEMO_VAULT_ID` isn't set on the API |
 
+### `POST /demo/reset`
+
+Merchant only: the dashboard's session, or the merchant key, which is what `backend/scripts/seed_demo.py --reset` sends. Wipes the demo back to empty: voids every seeded order that still has an open hold at PayPal, then deletes every seeded order, mandate, check result, approval and dispute row. Seeded means the mandate's `buyer_label` starts with `seed-demo:`. Nothing else is touched. No body.
+
+Success is a `200`:
+
+```json
+{
+  "voided_holds": 2,
+  "voided_order_ids": [12, 15],
+  "deleted_orders": 17,
+  "deleted_mandates": 17,
+  "deleted_disputes": 0
+}
+```
+
+Captured orders stay captured at PayPal, and disputes stay open there. The reset only forgets them in Leash. It doesn't seed again, run the script for that.
+
+| Code | When |
+|---|---|
+| `409` | A human is approving or rejecting one of the seeded orders at that moment. Nothing is deleted. `detail` has `message` and `order_id`, try again in a few seconds |
+| `429` | More than 3 resets in a minute from one address. `Retry-After` says how long to wait |
+| `502` | PayPal couldn't void a hold. Holds voided before it stay voided, nothing is deleted, and running the reset again carries on from there. `detail` has `message` and `order_id` |
+
 ### `DELETE /demo/seeded`
 
-Merchant only, used by `backend/scripts/seed_demo.py --reset`. Deletes the seeded orders and mandates, which are the ones with a `buyer_label` starting with `seed-demo:`. Success is a `200` with `deleted_orders`, `deleted_mandates` and `deleted_disputes`.
+Merchant only. The delete half of `POST /demo/reset` on its own. Deletes the seeded orders and mandates, which are the ones with a `buyer_label` starting with `seed-demo:`. Success is a `200` with `deleted_orders`, `deleted_mandates` and `deleted_disputes`.
 
 Any dispute rows synced onto those orders are deleted too, since an order can't be deleted while a dispute points at it. That only forgets them in Leash: the dispute stays open at PayPal, the same way a capture does.
 

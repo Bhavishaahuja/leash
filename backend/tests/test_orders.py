@@ -1466,10 +1466,10 @@ def test_every_route_in_the_app_needs_a_key():
         for method in operations:
             assert no_key.request(method, path).status_code == 401, method + " " + route_path
             checked += 1
-    # three for mandates, four for orders, one for review links, one for agent status, two for the
-    # demo routes, one for stats, five for disputes. if this drops to 0 the loop above isn't
+    # three for mandates, four for orders, one for review links, one for agent status, three for
+    # the demo routes, one for stats, five for disputes. if this drops to 0 the loop above isn't
     # checking anything, so it can't just pass
-    assert checked == 17
+    assert checked == 18
 
 
 # ---- session tokens on the real routes ----
