@@ -157,6 +157,15 @@ def test_a_mandate_with_only_an_item_has_a_plain_product_line():
     assert item_display_name(item) == "Camping mug"
 
 
+def test_a_size_that_already_says_size_isnt_doubled():
+    # the live demo mandate stores "size women's size 9", which used to come out "size size ..."
+    mandate = make_mandate(item="trail runners", color="black", size="size women's 9")
+
+    item = build_demo_order(mandate, DemoScenario.clean).items[0]
+
+    assert item_display_name(item) == "Trail runners, black, size women's 9"
+
+
 def test_wrong_color_differs_from_clean_only_in_color():
     clean = build_demo_order(make_mandate(), DemoScenario.clean).items[0].model_dump()
 

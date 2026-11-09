@@ -3,7 +3,7 @@ import { ApiError, listMandates, placeDemoOrder } from '../api'
 import { ReviewLinkBox } from '../components/ReviewLinkBox'
 import { StatusChip, type DisplayStatus } from '../components/StatusChip'
 import { SCENARIOS, scenarioBlocker } from '../lib/demoScenarios'
-import { describeItem, formatMoney, formatTime } from '../lib/format'
+import { SEED_LABEL_PREFIX, describeItem, formatMoney, formatTime } from '../lib/format'
 import { useAsync } from '../lib/useAsync'
 import type { DemoScenario, MandateSummary, PlacedOrder } from '../types'
 
@@ -66,8 +66,20 @@ interface ScenarioPickerProps {
   mandates: MandateSummary[]
 }
 
+// seed_demo.py's trick buyers (injection in the name and so on) are labeled "seed-demo:sneaky: ...".
+// the list is newest first and the seed makes those last, so without this a fresh demo opens on
+// the injection test buyer
+function defaultMandateId(mandates: MandateSummary[]): number {
+  for (const mandate of mandates) {
+    if (!mandate.buyer_label.startsWith(SEED_LABEL_PREFIX + 'sneaky:')) {
+      return mandate.id
+    }
+  }
+  return mandates[0].id
+}
+
 function ScenarioPicker({ mandates }: ScenarioPickerProps) {
-  const [mandateId, setMandateId] = useState(mandates[0].id)
+  const [mandateId, setMandateId] = useState(() => defaultMandateId(mandates))
   const [placing, setPlacing] = useState<DemoScenario | null>(null)
   const [result, setResult] = useState<PlacedOrder | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -187,7 +199,8 @@ function ResultCard({ order }: { order: PlacedOrder }) {
         <StatusChip status={status} />
       </div>
 
-      <p className="reason result-card__reason">
+      {/* colored by verdict like the side panel, so a clean match doesn't read as a warning */}
+      <p className={'result-card__reason ' + (check ? 'verdict-text--' + check.verdict : 'reason')}>
         {check ? check.reason : 'No check result on this order.'}
       </p>
 

@@ -25,7 +25,7 @@ import {
   StatusCell,
   TotalCell,
 } from '../components/orderCells'
-import { formatTime, summarizeItems } from '../lib/format'
+import { buyerName, formatTime, summarizeItems } from '../lib/format'
 import { DECISION_LABELS, decisionKind, decisionMs, displayStatus } from '../lib/orderState'
 import { useAsync } from '../lib/useAsync'
 import type { Order } from '../types'
@@ -91,6 +91,21 @@ function matchesFilter(order: Order, filter: Filter): boolean {
 // how urgent a status is, so sorting the Status column puts work-to-do on top
 const STATUS_ORDER = ['needs_review', 'created', 'authorized', 'failed', 'voided', 'captured']
 
+// below this the grid only has room for about three columns, so it keeps the ones a merchant on a
+// phone actually needs: what was ordered, whether money is held, and how much
+const NARROW_SCREEN = '(max-width: 640px)'
+
+function useNarrowScreen(): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW_SCREEN).matches)
+  useEffect(() => {
+    const query = window.matchMedia(NARROW_SCREEN)
+    const update = () => setNarrow(query.matches)
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  }, [])
+  return narrow
+}
+
 // stable loader identity so useAsync fetches once
 const loadOrders = () => listOrders()
 
@@ -101,43 +116,55 @@ export function DashboardPage() {
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const narrow = useNarrowScreen()
 
-  const columnDefs = useMemo<ColDef<Order>[]>(
-    () => [
-      {
-        headerName: 'Time',
-        field: 'created_at',
-        valueFormatter: (params) => (params.value ? formatTime(params.value) : ''),
-        sort: 'desc',
-        width: 120,
-        cellClass: 'muted',
-      },
-      {
-        headerName: 'Order',
-        colId: 'order',
-        // what quick search and sorting see: the item, the buyer and the order number
-        valueGetter: (params) =>
-          params.data ? summarizeItems(params.data.items) + ' ' + params.data.mandate.buyer_label + ' #' + params.data.id : '',
-        cellRenderer: OrderCell,
-        minWidth: 200,
-        flex: 1.2,
-      },
-      {
-        headerName: 'Total',
-        field: 'total',
-        valueGetter: (params) => (params.data ? Number(params.data.total) : null),
-        cellRenderer: TotalCell,
-        type: 'rightAligned',
-        width: 100,
-      },
-      {
-        headerName: 'Status',
-        colId: 'status',
-        valueGetter: (params) => (params.data ? displayStatus(params.data) : ''),
-        comparator: (a: string, b: string) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b),
-        cellRenderer: StatusCell,
-        width: 160,
-      },
+  const columnDefs = useMemo<ColDef<Order>[]>(() => {
+    const timeColumn: ColDef<Order> = {
+      headerName: 'Time',
+      field: 'created_at',
+      valueFormatter: (params) => (params.value ? formatTime(params.value) : ''),
+      // still sorts newest first when hidden on a phone
+      sort: 'desc',
+      hide: narrow,
+      width: 120,
+      cellClass: 'muted',
+    }
+    const orderColumn: ColDef<Order> = {
+      headerName: 'Order',
+      colId: 'order',
+      // what quick search and sorting see: the item, the buyer and the order number
+      valueGetter: (params) =>
+        params.data ? summarizeItems(params.data.items) + ' ' + buyerName(params.data.mandate.buyer_label) + ' #' + params.data.id : '',
+      cellRenderer: OrderCell,
+      minWidth: narrow ? 120 : 200,
+      flex: 1.2,
+    }
+    const totalColumn: ColDef<Order> = {
+      headerName: 'Total',
+      field: 'total',
+      valueGetter: (params) => (params.data ? Number(params.data.total) : null),
+      cellRenderer: TotalCell,
+      type: 'rightAligned',
+      width: narrow ? 90 : 100,
+    }
+    const statusColumn: ColDef<Order> = {
+      headerName: 'Status',
+      colId: 'status',
+      valueGetter: (params) => (params.data ? displayStatus(params.data) : ''),
+      comparator: (a: string, b: string) => STATUS_ORDER.indexOf(a) - STATUS_ORDER.indexOf(b),
+      cellRenderer: StatusCell,
+      // wide enough for the longest chip, "Waiting on buyer"
+      width: narrow ? 150 : 160,
+    }
+
+    // on a phone, status comes right after the order so you can see what's held without scrolling
+    let leadColumns = [timeColumn, orderColumn, totalColumn, statusColumn]
+    if (narrow) {
+      leadColumns = [timeColumn, orderColumn, statusColumn, totalColumn]
+    }
+
+    return [
+      ...leadColumns,
       {
         headerName: 'Risk',
         colId: 'risk',
@@ -168,9 +195,8 @@ export function DashboardPage() {
         cellRenderer: DecideTimeCell,
         width: 140,
       },
-    ],
-    [],
-  )
+    ]
+  }, [narrow])
 
   const defaultColDef = useMemo<ColDef<Order>>(
     () => ({

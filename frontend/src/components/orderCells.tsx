@@ -2,7 +2,7 @@
 // `data`, so they can read both state fields and the nested check/approval objects.
 
 import type { CustomCellRendererProps } from 'ag-grid-react'
-import { formatDuration, formatMoney, summarizeItems } from '../lib/format'
+import { buyerName, formatDuration, formatMoney, summarizeItems } from '../lib/format'
 import { DECISION_LABELS, decisionKind, decisionMs, displayStatus, isRubberStamp } from '../lib/orderState'
 import type { Order } from '../types'
 import { RiskBar } from './RiskBar'
@@ -61,7 +61,7 @@ export function OrderCell({ data }: CellProps) {
     <span className="order-cell">
       <span className="order-cell__item">{summarizeItems(data.items)}</span>
       <span className="order-cell__buyer">
-        <span className="mono">#{data.id}</span> for {data.mandate.buyer_label}
+        <span className="mono">#{data.id}</span> for {buyerName(data.mandate.buyer_label)}
       </span>
     </span>
   )

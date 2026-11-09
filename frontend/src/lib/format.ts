@@ -34,9 +34,28 @@ export function describeItem(item: OrderItem): string {
     parts.push(item.color)
   }
   if (item.size) {
-    parts.push('size ' + item.size)
+    parts.push(sizeLabel(item.size))
   }
   return parts.join(', ')
+}
+
+function sizeLabel(size: string): string {
+  // agents sometimes send "size women's 9" already, and "size size women's 9" reads like a bug
+  if (size.trim().toLowerCase().startsWith('size')) {
+    return size.trim()
+  }
+  return 'size ' + size
+}
+
+// seed_demo.py tags its buyers so a reset can find them (SEED_LABEL_PREFIX in backend/app/demo.py).
+// the tag is for the script, not for people, so the screens drop it
+export const SEED_LABEL_PREFIX = 'seed-demo:'
+
+export function buyerName(label: string): string {
+  if (label.startsWith(SEED_LABEL_PREFIX)) {
+    return label.slice(SEED_LABEL_PREFIX.length).trim()
+  }
+  return label
 }
 
 export function summarizeItems(items: OrderItem[]): string {

@@ -3,7 +3,7 @@
 
 import { useEffect, useRef } from 'react'
 import { compareMandate } from '../lib/compare'
-import { describeItem, formatDateTime, formatDuration, formatMoney } from '../lib/format'
+import { buyerName, describeItem, formatDateTime, formatDuration, formatMoney } from '../lib/format'
 import { DECISION_LABELS, RUBBER_STAMP_MS, decisionKind, displayStatus, isRubberStamp } from '../lib/orderState'
 import type { Order } from '../types'
 import { ReviewLinkBox } from './ReviewLinkBox'
@@ -41,7 +41,7 @@ export function OrderPanel({ order, onClose }: OrderPanelProps) {
           <div>
             <p className="panel__kicker">Order #{order.id}</p>
             <h2 id="panel-title" className="panel__title">
-              {order.mandate.buyer_label}'s agent order
+              {buyerName(order.mandate.buyer_label)}'s agent order
             </h2>
           </div>
           <button ref={closeButton} type="button" className="icon-button" onClick={onClose} aria-label="Close">

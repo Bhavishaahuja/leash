@@ -240,7 +240,12 @@ def item_display_name(item):
     if item.color:
         parts.append(item.color)
     if item.size:
-        parts.append("size " + item.size)
+        # the agent may already have written "size women's 9", don't make it "size size ..."
+        size = item.size.strip()
+        if size.lower().startswith("size"):
+            parts.append(size)
+        else:
+            parts.append("size " + size)
     return ", ".join(parts)
 
 
