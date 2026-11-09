@@ -630,6 +630,20 @@ def check_and_save(session, order, claude, sharp=False):
         logger.exception("Couldn't save the intent check for order %s", order.id)
 
 
+def item_to_json(item):
+    # how an OrderItemIn is saved on Order.items, and so what the intent check reads.
+    # backend/evals/run_evals.py builds its orders with this too, so they look like real ones
+    return {
+        "name": item.name,
+        "color": item.color,
+        "size": item.size,
+        "model": item.model,
+        "event_date": item.event_date.isoformat() if item.event_date else None,
+        "quantity": item.quantity,
+        "unit_price": money(item.unit_price),
+    }
+
+
 def place_order(session, mandate, items, shipping, vault_id, paypal, claude, merchant=None):
     # the whole path an order takes: save, hold at PayPal, check, auto-decide. POST /orders and
     # POST /demo/orders both land here, so the demo can't drift from what an agent's order does.
@@ -637,15 +651,7 @@ def place_order(session, mandate, items, shipping, vault_id, paypal, claude, mer
     # returns (order, payer_action_url), and the url is None unless a buyer has to approve first
     items_json = []
     for item in items:
-        items_json.append({
-            "name": item.name,
-            "color": item.color,
-            "size": item.size,
-            "model": item.model,
-            "event_date": item.event_date.isoformat() if item.event_date else None,
-            "quantity": item.quantity,
-            "unit_price": money(item.unit_price),
-        })
+        items_json.append(item_to_json(item))
 
     # save first so the PayPal order can carry our id
     order = Order(
