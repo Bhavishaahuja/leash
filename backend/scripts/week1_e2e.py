@@ -13,7 +13,8 @@
 #
 # Run from the repo root:
 #   python backend/scripts/week1_e2e.py                                   localhost:8000
-#   python backend/scripts/week1_e2e.py https://leash-api.onrender.com    Render
+#   python backend/scripts/week1_e2e.py https://leash-api-q3rw.onrender.com    Render
+# or set LEASH_API_URL=https://leash-api-q3rw.onrender.com first and leave the argument off
 #
 # Needs spikes/.vault_token.json (run spikes/spike2_vault.py once) and the PayPal keys in
 # your local .env, for the read-back, plus AGENT_API_KEY, MERCHANT_API_KEY and
@@ -37,7 +38,9 @@ from backend.app.config import get_settings  # noqa: E402
 from backend.app.orders import CAPTURE, payment_request_id  # noqa: E402
 from backend.app.paypal_client import client_from_settings  # noqa: E402
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+# the command-line base_url wins, then LEASH_API_URL, then the local API. straight from the
+# environment, not .env, so a leftover .env line can't quietly send a local run to Render
+DEFAULT_BASE_URL = os.environ.get("LEASH_API_URL", "").strip() or "http://127.0.0.1:8000"
 VAULT_FILE = os.path.join(REPO_ROOT, "spikes", ".vault_token.json")
 
 MANDATE = {

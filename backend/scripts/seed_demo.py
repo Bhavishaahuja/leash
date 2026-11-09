@@ -7,6 +7,8 @@
 #   .venv\Scripts\python.exe backend\scripts\seed_demo.py                 local API on :8000
 #   .venv\Scripts\python.exe backend\scripts\seed_demo.py --base-url https://your-api.example.com
 #   .venv\Scripts\python.exe backend\scripts\seed_demo.py --reset         void open holds, delete
+# or set LEASH_API_URL once in the cmd window instead of passing --base-url every time:
+#   set LEASH_API_URL=https://leash-api-q3rw.onrender.com
 #
 # Needs AGENT_API_KEY and MERCHANT_API_KEY in .env matching the API's, plus spikes/.vault_token.json
 # (run spikes/spike2_vault.py once). Each order is about 2 Claude calls, and money never really
@@ -32,7 +34,9 @@ import requests  # noqa: E402
 from backend.app.config import get_settings  # noqa: E402
 from backend.app.demo import SEED_LABEL_PREFIX  # noqa: E402
 
-DEFAULT_BASE_URL = "http://127.0.0.1:8000"
+# --base-url wins, then LEASH_API_URL, then the local API. read straight from the environment on
+# purpose, not .env: a line left in .env shouldn't quietly point a local run at Render
+DEFAULT_BASE_URL = os.environ.get("LEASH_API_URL", "").strip() or "http://127.0.0.1:8000"
 VAULT_FILE = os.path.join(REPO_ROOT, "spikes", ".vault_token.json")
 TIMEOUT_SECONDS = 180
 
@@ -334,6 +338,8 @@ def main():
 
     try:
         if args.reset:
+            # say where first: this voids holds and deletes rows, it matters which API it hits
+            print("Resetting " + api.base_url + "...")
             run_reset(api)
             return 0
 
