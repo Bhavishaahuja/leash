@@ -151,6 +151,8 @@ function order(input: MockOrderInput): OrderDetail {
     merchant: null,
     // the two seed agents take turns, like seed_demo.py
     agent_name: input.id % 2 === 1 ? 'Wren' : 'Thistle',
+    replaced_by_order_id: null,
+    replaces_order_id: null,
     items: input.items,
     total: input.total,
     shipping_amount: input.shipping,

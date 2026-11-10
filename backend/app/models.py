@@ -46,6 +46,8 @@ class CheckedBy(str, enum.Enum):
 class ApprovalAction(str, enum.Enum):
     approve = "approve"
     reject = "reject"
+    # the human took the suggested fix: this order was voided and a new one placed for the fix
+    accept_fix = "accept_fix"
 
 
 class ReviewState(str, enum.Enum):
@@ -121,6 +123,10 @@ class Order(Base):
     # which shopping agent placed it, from the API key it used (AGENT_API_KEYS). never from the
     # request body. null on orders from before agents had names
     agent_name: Mapped[str | None] = mapped_column(String(100))
+    # a human accepted the suggested fix on this order: it was voided and replaced by that one.
+    # the new order points back with replaces_order_id. both null on every other order
+    replaced_by_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"))
+    replaces_order_id: Mapped[int | None] = mapped_column(ForeignKey("orders.id"))
     items: Mapped[list] = mapped_column(JSON)
     total: Mapped[Decimal] = mapped_column(Numeric(10, 2))
     # the part of total that's shipping. null on orders saved before this column existed,

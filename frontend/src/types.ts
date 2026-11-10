@@ -14,7 +14,8 @@ export type Verdict = 'match' | 'mismatch' | 'unsure'
 // this used to be 'claude', the backend renamed it
 export type CheckedBy = 'rules' | 'ai'
 
-export type ApprovalAction = 'approve' | 'reject'
+// accept_fix: the human took the suggested fix, so the order was voided and replaced
+export type ApprovalAction = 'approve' | 'reject' | 'accept_fix'
 
 // the rubber-stamp watch: sharp while the human has been approving too fast
 export type WatchMode = 'normal' | 'sharp'
@@ -118,6 +119,10 @@ export interface Order {
   // which shopping agent placed it, worked out by the API from the agent's key. "Demo page" for
   // an order from /place-order, null on orders from before agents had names
   agent_name: string | null
+  // set when a human accepted the suggested fix: the voided order and its replacement point at
+  // each other. null on every other order
+  replaced_by_order_id: number | null
+  replaces_order_id: number | null
   items: OrderItem[]
   total: string
   // null on orders from before it was saved
@@ -180,6 +185,22 @@ export interface ReviewView {
     mismatched_fields: string[] | null
     suggested_fix: SuggestedFix | null
   } | null
+  // set once the human accepted the suggested fix
+  replaced_by_order_id: number | null
+}
+
+// POST /review/{token}/accept-fix: the original, now voided, and the order placed for the fix.
+// the replacement went through the check and auto-decide, so it can be captured or waiting
+export interface AcceptFixResult {
+  order: ReviewView
+  replacement: {
+    id: number
+    items: OrderItem[]
+    total: string
+    currency: string
+    status: OrderStatus
+    review_state: ReviewState | null
+  }
 }
 
 // ---- disputes. mirrors backend/app/disputes.py ----

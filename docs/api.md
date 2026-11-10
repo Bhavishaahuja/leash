@@ -13,7 +13,7 @@ There are four kinds of caller. Sending the wrong credential, or none, returns `
 | Shopping agent | `X-API-Key: <its key from AGENT_API_KEYS>` | `POST /mandates`, `POST /orders`, `POST /orders/{id}/authorize`, `GET /agent/orders/{id}` |
 | Merchant dashboard | `Authorization: Bearer <session token>` | `GET /orders`, `GET /orders/{id}`, `GET /mandates`, `GET /mandates/{id}`, `GET /stats`, `POST /orders/{id}/review-link`, `POST /demo/orders`, `POST /demo/reset`, every `/disputes` route |
 | Merchant scripts | `X-API-Key: <MERCHANT_API_KEY>` | The same as the dashboard |
-| Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject` |
+| Human on the confirm page | The token in the URL, nothing else | `GET /review/{token}`, `POST /review/{token}/opened`, `POST /review/{token}/approve`, `POST /review/{token}/reject`, `POST /review/{token}/accept-fix` |
 
 A credential only works on its own row. The agent key can't read orders, and a dashboard session can't call `POST /orders`. Its one way to place an order is `POST /demo/orders`, which only builds the fixed demo scenarios.
 
@@ -159,6 +159,7 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 - **`capture_id`** is set once money is taken. **`void_result`** is PayPal's status, normally `"VOIDED"`, once a hold is released. Both can be `null`.
 - **`shipping_amount`** is `null` on orders from before it was saved.
 - **Item `model` and `event_date`** are optional. `event_date` is a date like `"2026-12-05"`. Orders from before they existed don't have the keys at all, so treat missing the same as `null`.
+- **`replaced_by_order_id`** and **`replaces_order_id`** link an order to the one placed when a human accepted its suggested fix. The voided original has `replaced_by_order_id`, the new order has `replaces_order_id`. Both are `null` on every other order.
 - **`agent_name`** is the shopping agent that placed the order. The API works it out from the agent's key, never from the request. `"Demo page"` for an order from `/place-order`, `"Shopping agent"` for one placed with the old single `AGENT_API_KEY`, and `null` on orders from before agents had names.
 - **`merchant`** is `null` for an order at Fernwood Supply Co, which is every agent order. Only `POST /demo/orders` sets it.
 - **`max_price`** can be in another currency, so don't hardcode `$`. Read `mandate.rules.currency`. If that's `null`, treat it as USD.
@@ -202,7 +203,7 @@ In sharp mode, `reason` reads "Mandate said X, order has Y", under 12 words, wit
 
 | Field | Type | Notes |
 |---|---|---|
-| `action` | `approve`, `reject` or `null` | `null` means opened but not decided yet |
+| `action` | `approve`, `reject`, `accept_fix` or `null` | `null` means opened but not decided yet. `accept_fix` means the human took the suggested fix |
 | `opened_at` | time | Stamped by the server on the first `POST /review/{token}/opened`. Later calls don't move it |
 | `decided_at` | time or `null` | When the tap reached the server |
 | `decision_ms` | int or `null` | `decided_at` minus `opened_at`, on the server's clock. This is the attention number. `0` means the page never reported it opened |
@@ -474,6 +475,50 @@ Two `502` cases are different:
 - **PayPal succeeded but saving failed:** only `message` is present. The link is used up, so the merchant has to create a new one after a couple of minutes. Going again with it is safe and won't charge twice.
 
 Double taps are safe. Only one goes through, and the others get a `409`. Still disable the button while a request is in flight.
+
+### `POST /review/{token}/accept-fix`
+
+For an order whose `intent_check.suggested_fix` isn't `null`. It voids this order's hold, then places a new order for the suggested item on the same saved wallet, for the same agent, mandate and shipping, with no buyer popup. The new order goes through the intent check and auto-decide like any other, so it can be captured or end up waiting for review itself. Same body as approve, and the same rules: the link works once, double taps get a `409`, and `decision_ms` is measured on the server.
+
+Success is a `200`:
+
+```json
+{
+  "order": { "id": 12, "status": "voided", "review_state": "rejected", "replaced_by_order_id": 13, "...": "same shape as GET /review/{token}" },
+  "replacement": {
+    "id": 13,
+    "items": [{ "name": "Canvas low-top sneaker", "color": "white", "size": "9", "quantity": 1, "unit_price": "64.00" }],
+    "total": "70.00",
+    "currency": "USD",
+    "status": "captured",
+    "review_state": "auto_approved"
+  }
+}
+```
+
+Everything that could stop the swap is checked before any money moves. Each of these is a `409` with `message` in `detail`, and the order and the link are left exactly as they were, so approve and reject still work:
+
+- There's no suggested fix.
+- The order wasn't paid with a saved wallet, so nobody could approve a new payment.
+- The suggested item isn't in stock any more, or its price changed since the page loaded.
+
+The other errors:
+
+| Code | When | What happened |
+|---|---|---|
+| `502` with `status: "authorized"` | PayPal couldn't void the original | Nothing changed. Trying again with the same link is safe |
+| `502` with `status: "voided"` | The void went through, but the replacement order failed | The original stays voided and nobody was charged for anything. `detail` has `voided_order_id`, `replacement_order_id` (the failed attempt, or `null` if it never got saved) and, when PayPal refused it, PayPal's error in `paypal`. The link is used up. The shopper's agent has to order again |
+
+```json
+{
+  "detail": {
+    "message": "The original hold was voided, but the replacement order failed. Nothing was charged. The shopper's agent will need to order again.",
+    "voided_order_id": 12,
+    "status": "voided",
+    "replacement_order_id": 13
+  }
+}
+```
 
 ## Removed routes
 

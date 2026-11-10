@@ -182,6 +182,10 @@ class OrderOut(BaseModel):
     merchant: str | None
     # the shopping agent that placed it, from its API key. null on orders from before that
     agent_name: str | None
+    # set when a human accepted a suggested fix: the voided order and its replacement point at
+    # each other. null on every other order
+    replaced_by_order_id: int | None
+    replaces_order_id: int | None
     items: list
     total: Decimal
     shipping_amount: Decimal | None
@@ -675,12 +679,15 @@ def item_to_json(item):
 
 
 def place_order(
-    session, mandate, items, shipping, vault_id, paypal, claude, merchant=None, agent_name=None
+    session, mandate, items, shipping, vault_id, paypal, claude, merchant=None, agent_name=None,
+    replaces_order_id=None,
 ):
     # the whole path an order takes: save, hold at PayPal, check, auto-decide. POST /orders and
     # POST /demo/orders both land here, so the demo can't drift from what an agent's order does.
     # merchant stays None for a real agent order, those are always at our one store.
     # agent_name is whoever the caller's key says it is, never something the body claimed.
+    # replaces_order_id is set by an accepted fix, and saved before PayPal is called, so even a
+    # replacement that fails at PayPal says which order it was replacing.
     # returns (order, payer_action_url), and the url is None unless a buyer has to approve first
     items_json = []
     for item in items:
@@ -697,6 +704,7 @@ def place_order(
         vault_id=vault_id,
         merchant=merchant,
         agent_name=agent_name,
+        replaces_order_id=replaces_order_id,
         status=OrderStatus.created,
     )
     session.add(order)

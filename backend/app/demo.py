@@ -12,7 +12,7 @@ from decimal import ROUND_DOWN, ROUND_UP, Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.app import catalog
@@ -378,6 +378,12 @@ def delete_seeded_rows(session):
             "open_order_ids": open_order_ids,
         })
 
+    # an accepted fix links two seeded orders to each other. let go of those links first, so no
+    # database has to work out which of the pair it's allowed to delete first
+    session.execute(
+        update(Order).where(Order.id.in_(order_ids))
+        .values(replaced_by_order_id=None, replaces_order_id=None)
+    )
     # a dispute points at its order, so it has to go first or Postgres refuses the order delete.
     # same deal as captures: the dispute stays at PayPal, this only forgets it here
     deleted_disputes = session.execute(

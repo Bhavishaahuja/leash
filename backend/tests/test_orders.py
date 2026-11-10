@@ -1311,7 +1311,8 @@ def test_every_order_response_has_the_same_shape(client, paypal):
 
     shared = {
         "id", "mandate_id", "paypal_order_id", "authorization_id", "capture_id", "void_result",
-        "vault_id", "merchant", "agent_name", "items", "total", "shipping_amount", "currency",
+        "vault_id", "merchant", "agent_name", "replaced_by_order_id", "replaces_order_id",
+        "items", "total", "shipping_amount", "currency",
         "status", "review_state", "authorization_expires_at", "watch_mode", "created_at",
         "mandate", "intent_check", "approval",
     }
@@ -1798,9 +1799,11 @@ def test_review_page_has_what_confirmpage_needs_and_no_more(client, paypal, clau
 
     assert response.status_code == 200
     body = response.json()
+    # replaced_by_order_id so the page can say "replaced by order #N" after an accepted fix. it's
+    # another order id, nothing the link holder couldn't already see one of
     assert set(body) == {
         "id", "items", "total", "shipping_amount", "currency", "status", "review_state",
-        "authorization_expires_at", "mandate", "intent_check",
+        "authorization_expires_at", "mandate", "intent_check", "replaced_by_order_id",
     }
     assert body["items"][0]["name"] == "Trail runner"
     assert body["total"] == "66.00"

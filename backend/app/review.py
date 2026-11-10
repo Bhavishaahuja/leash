@@ -20,7 +20,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -30,6 +30,7 @@ from backend.app.intent.rules import as_utc
 from backend.app.models import (
     Approval,
     ApprovalAction,
+    CatalogItem,
     Order,
     OrderStatus,
     ReviewState,
@@ -88,6 +89,27 @@ class ReviewView(BaseModel):
     authorization_expires_at: datetime | None
     mandate: ReviewMandate
     intent_check: ReviewCheck | None
+    # set once the human accepted the suggested fix: this order was voided and replaced by that one
+    replaced_by_order_id: int | None = None
+
+
+class ReplacementOrder(BaseModel):
+    # the order placed for the accepted fix. what the human needs to see happened to it, nothing
+    # more: it went through the same check and auto-decide as any order
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    items: list
+    total: Decimal
+    currency: str
+    status: OrderStatus
+    review_state: ReviewState | None
+
+
+class AcceptFixResult(BaseModel):
+    # the original, now voided, and what replaced it
+    order: ReviewView
+    replacement: ReplacementOrder
 
 
 class ReviewTapBody(BaseModel):
@@ -325,3 +347,157 @@ def reject_order(token: str, session: DbSession, paypal: PayPal, body: OptionalT
         logger.exception("Order %s was voided at PayPal but saving that failed", order_id)
         raise save_failed(orders.VOID, order_id) from error
     return order
+
+
+# ---- accepting the suggested fix ----
+
+
+class FixUnavailable(Exception):
+    # the suggested fix can't be placed. found before any money moves, so nothing has changed
+    pass
+
+
+def replacement_items(session, order):
+    # the one item the replacement order is for, checked against the catalog as it is right now.
+    # raises FixUnavailable for anything that would stop the swap, before the void
+    check = order.intent_check
+    fix = check.suggested_fix if check is not None else None
+    if not fix:
+        raise FixUnavailable("There's no suggested fix for this order")
+    # no buyer can approve a new payment from here, so the replacement has to go on the same saved
+    # wallet. an order paid through the PayPal popup doesn't have one
+    if not order.vault_id:
+        raise FixUnavailable("This order wasn't paid with a saved wallet, so it can't be replaced")
+
+    row = session.scalars(select(CatalogItem).where(CatalogItem.sku == fix["sku"])).first()
+    if row is None or not row.in_stock:
+        raise FixUnavailable("The suggested item isn't in stock any more")
+    # the human agreed to the price on the screen. if the catalog changed since, they haven't
+    if row.price != Decimal(str(fix["price"])):
+        raise FixUnavailable("The suggested item's price changed since this page loaded")
+
+    try:
+        item = orders.OrderItemIn(
+            name=row.name, color=row.color, size=row.size, model=row.model,
+            event_date=row.event_date, quantity=fix["quantity"], unit_price=row.price,
+        )
+    except ValidationError as error:
+        raise FixUnavailable("The suggested fix isn't a valid order") from error
+    return [item]
+
+
+def replacement_failed(voided_order_id, replacement_order_id, paypal_detail=None):
+    # the void went through and stays: nobody is charged for the original. what failed is the new
+    # order, so the human hears exactly that, and that nothing was charged for it either
+    detail = {
+        "message": "The original hold was voided, but the replacement order failed. Nothing "
+        "was charged. The shopper's agent will need to order again.",
+        "voided_order_id": voided_order_id,
+        "status": OrderStatus.voided.value,
+        "replacement_order_id": replacement_order_id,
+    }
+    if paypal_detail is not None:
+        detail["paypal"] = paypal_detail
+    return HTTPException(status_code=502, detail=detail)
+
+
+def replacement_order_id_for(session, voided_order_id):
+    # the replacement row is saved before PayPal is called, so even a failed one can be found
+    query = select(Order.id).where(Order.replaces_order_id == voided_order_id)
+    return session.scalars(query).first()
+
+
+@router.post("/review/{token}/accept-fix", response_model=AcceptFixResult)
+def accept_fix(
+    token: str, session: DbSession, paypal: PayPal, claude: orders.Claude,
+    body: OptionalTap = None,
+):
+    # void this order and place the suggested fix instead, on the same saved wallet and for the
+    # same agent. same rules as approve and reject: the link works once, the claim stops a double
+    # tap, and decision_ms comes from the server's clock
+    tapped_at = utc_now()
+    order = claim_by_token(session, token)
+    order_id = order.id
+
+    # everything that could stop the swap, before any money moves. if one of these says no, the
+    # link and the hold are both left as they were
+    try:
+        items = replacement_items(session, order)
+    except FixUnavailable as error:
+        orders.release_claim(session, order_id)
+        raise HTTPException(status_code=409, detail={"message": str(error)}) from error
+
+    try:
+        voided = paypal.void_authorization(
+            order.authorization_id, request_id=orders.payment_request_id(order, orders.VOID)
+        )
+    except orders.PAYPAL_FAILURES as error:
+        logger.exception("PayPal void failed for order %s while accepting its fix", order_id)
+        orders.release_claim(session, order_id)
+        raise payment_failed(orders.VOID) from error
+
+    # the void and the human's tap land in one commit, before the new order is tried. from here
+    # the original hold is gone, whatever happens to the replacement
+    tap = orders.ReviewTap(ApprovalAction.accept_fix, tapped_at, client_ms(body))
+    try:
+        order = orders.load_order(session, order_id, lock=True)
+        order.status = OrderStatus.voided
+        order.review_state = ReviewState.rejected
+        order.void_result = voided.get("status") if voided else "VOIDED"
+        order.payment_claimed_at = None
+        orders.record_tap(session, order_id, tap)
+        session.commit()
+    except SQLAlchemyError as error:
+        session.rollback()
+        logger.exception("Order %s was voided at PayPal but saving that failed", order_id)
+        raise save_failed(orders.VOID, order_id) from error
+
+    # the same path as any agent order: hold on the saved wallet, the intent check, auto-decide.
+    # a fix that turns out not to match after all goes to a human like any other order
+    try:
+        replacement, _ = orders.place_order(
+            session, order.mandate, items, order.shipping_amount or Decimal("0"), order.vault_id,
+            paypal, claude, merchant=order.merchant, agent_name=order.agent_name,
+            replaces_order_id=order_id,
+        )
+    except HTTPException as error:
+        # PayPal refused the new order. place_order saved it as failed before raising
+        logger.error("Replacement for voided order %s failed at PayPal", order_id)
+        session.rollback()
+        new_id = replacement_order_id_for(session, order_id)
+        link_replacement(session, order_id, new_id)
+        raise replacement_failed(order_id, new_id, error.detail) from error
+    except Exception as error:
+        logger.exception("Replacement for voided order %s failed", order_id)
+        session.rollback()
+        new_id = replacement_order_id_for(session, order_id)
+        link_replacement(session, order_id, new_id)
+        raise replacement_failed(order_id, new_id) from error
+
+    link_replacement(session, order_id, replacement.id)
+
+    # PayPal took the order but never authorized it: no hold, so nothing was checked or charged
+    if replacement.status == OrderStatus.failed:
+        raise replacement_failed(order_id, replacement.id)
+
+    voided_order = orders.load_order(session, order_id)
+    return AcceptFixResult(
+        order=ReviewView.model_validate(voided_order),
+        replacement=ReplacementOrder.model_validate(replacement),
+    )
+
+
+def link_replacement(session, voided_order_id, replacement_order_id):
+    # the new order already points back. this is the forward link, and losing it isn't worth
+    # failing a request whose money has already moved
+    if replacement_order_id is None:
+        return
+    try:
+        voided_order = orders.load_order(session, voided_order_id, lock=True)
+        voided_order.replaced_by_order_id = replacement_order_id
+        session.commit()
+    except SQLAlchemyError:
+        session.rollback()
+        logger.exception(
+            "Couldn't link order %s to its replacement %s", voided_order_id, replacement_order_id
+        )
