@@ -65,3 +65,38 @@ export function mandateCurrency(order: Order): string {
   const currency = order.mandate.rules.currency
   return typeof currency === 'string' && currency ? currency : 'USD'
 }
+
+// "held" means Leash didn't let the order through on its own: it went to a human, whatever they
+// decided. per agent, that share is the trust score: an agent that gets held a lot buys the wrong thing
+export function wasHeld(order: Order): boolean {
+  return order.review_state === 'needs_review' || order.review_state === 'approved' || order.review_state === 'rejected'
+}
+
+export interface HeldRate {
+  held: number
+  total: number
+  // what AG Grid sorts by, and what a plain text export shows
+  toString(): string
+}
+
+// AG Grid aggFunc for the "Held by Leash" column. each leaf value is 1 (held) or 0
+export function heldRateAgg(params: { values: unknown[] }): HeldRate {
+  let held = 0
+  let total = 0
+  for (const value of params.values) {
+    // a nested group passes up its own HeldRate, a leaf passes 1 or 0
+    if (value && typeof value === 'object' && 'held' in value) {
+      const inner = value as HeldRate
+      held += inner.held
+      total += inner.total
+    } else if (typeof value === 'number') {
+      held += value
+      total += 1
+    }
+  }
+  return {
+    held,
+    total,
+    toString: () => (total === 0 ? '' : Math.round((held / total) * 100) + '%'),
+  }
+}

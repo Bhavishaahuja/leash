@@ -66,6 +66,10 @@ services:
         value: https://leash-api-q3rw.onrender.com
       - key: VITE_USE_MOCKS
         value: "false"
+      # AG Grid Enterprise trial key (row grouping). set it in the Render dashboard, never in git.
+      # it still lands in the public JS, that's how AG Grid keys work
+      - key: VITE_AG_GRID_LICENSE_KEY
+        sync: false
     routes:
       # it's a single-page app: /dashboard and /confirm/<token> only exist in the browser, so
       # every path serves index.html. real files like /assets/*.js still win, Render only

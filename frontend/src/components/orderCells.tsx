@@ -3,7 +3,7 @@
 
 import type { CustomCellRendererProps } from 'ag-grid-react'
 import { buyerName, formatDuration, formatMoney, summarizeItems } from '../lib/format'
-import { DECISION_LABELS, decisionKind, decisionMs, displayStatus, isRubberStamp } from '../lib/orderState'
+import { DECISION_LABELS, decisionKind, decisionMs, displayStatus, isRubberStamp, type HeldRate } from '../lib/orderState'
 import type { Order } from '../types'
 import { RiskBar } from './RiskBar'
 import { StatusChip } from './StatusChip'
@@ -103,6 +103,23 @@ export function DecideTimeCell({ data }: CellProps) {
           Fast
         </span>
       )}
+    </span>
+  )
+}
+
+// group rows only: what share of this agent's orders Leash held for a human. leaf rows stay blank,
+// the Status and Decision columns already say it per order
+export function HeldRateCell({ value, node }: CustomCellRendererProps<Order, HeldRate | number>) {
+  if (!node.group || !value || typeof value !== 'object' || value.total === 0) {
+    return null
+  }
+  const percent = Math.round((value.held / value.total) * 100)
+  return (
+    <span className="held-rate">
+      <span className="held-rate__percent">{percent}% held</span>
+      <span className="held-rate__count">
+        {value.held} of {value.total} orders
+      </span>
     </span>
   )
 }

@@ -547,6 +547,45 @@ p {
   }
 }
 
+/* the group-by toggle sits alone, so it brings its own sunk track like .segmented */
+.segmented__button--solo {
+  background: var(--surface-sunk);
+  padding: 8px 12px;
+}
+
+.segmented__button--solo[aria-pressed='true'] {
+  background: var(--primary-soft);
+  color: var(--primary);
+  box-shadow: none;
+}
+
+.segmented__button--solo:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* group rows: the agent's trust score */
+.held-rate {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.3;
+}
+
+.held-rate__percent {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.held-rate__count {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.grid-wrap .ag-row-group {
+  background: var(--surface-sunk);
+  font-weight: 600;
+}
+
 .num,
 .num-cell {
   text-align: right;

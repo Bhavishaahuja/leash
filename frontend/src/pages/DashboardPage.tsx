@@ -15,6 +15,7 @@ import {
   type RowClickedEvent,
   type RowDataUpdatedEvent,
 } from 'ag-grid-community'
+import { LicenseManager, RowGroupingModule } from 'ag-grid-enterprise'
 import { AgGridReact } from 'ag-grid-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DEMO_RESET_EVENT, getStats, listOrders } from '../api'
@@ -23,6 +24,7 @@ import { StatsTiles } from '../components/StatsTiles'
 import {
   DecideTimeCell,
   DecisionCell,
+  HeldRateCell,
   OrderCell,
   ReasonCell,
   RiskCell,
@@ -30,7 +32,7 @@ import {
   TotalCell,
 } from '../components/orderCells'
 import { buyerName, formatTime, summarizeItems } from '../lib/format'
-import { DECISION_LABELS, decisionKind, decisionMs, displayStatus } from '../lib/orderState'
+import { DECISION_LABELS, decisionKind, decisionMs, displayStatus, heldRateAgg, wasHeld } from '../lib/orderState'
 import { usePolling } from '../lib/usePolling'
 import type { Order } from '../types'
 
@@ -45,11 +47,23 @@ const gridModules = [
   RowSelectionModule,
   RowStyleModule,
   CellStyleModule,
+  // Enterprise: group by agent, and the per-agent held rate
+  RowGroupingModule,
 ]
 if (import.meta.env.DEV) {
   gridModules.push(ValidationModule)
 }
 ModuleRegistry.registerModules(gridModules)
+
+// the trial key comes from the build env (Render sets it). without one the grid still groups,
+// it just shows AG Grid's watermark
+const agGridLicenseKey = import.meta.env.VITE_AG_GRID_LICENSE_KEY
+if (agGridLicenseKey) {
+  LicenseManager.setLicenseKey(agGridLicenseKey)
+}
+
+// what a group row's name is when an old order has no agent on it
+const UNKNOWN_AGENT = 'Unknown agent'
 
 // Quartz, pulled toward the app's palette so the grid doesn't look bolted on
 const gridTheme = themeQuartz.withParams({
@@ -138,6 +152,7 @@ export function DashboardPage() {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const narrow = useNarrowScreen()
+  const [groupByAgent, setGroupByAgent] = useState(false)
 
   const columnDefs = useMemo<ColDef<Order>[]>(() => {
     const timeColumn: ColDef<Order> = {
@@ -184,8 +199,39 @@ export function DashboardPage() {
       leadColumns = [timeColumn, orderColumn, statusColumn, totalColumn]
     }
 
+    // grouped, this column becomes the group rows (AG Grid hides it and draws the auto group column).
+    // ungrouped, it's a plain column so you can still see who placed each order
+    const agentColumn: ColDef<Order> = {
+      headerName: 'Agent',
+      colId: 'agent',
+      valueGetter: (params) => (params.data ? params.data.agent_name ?? UNKNOWN_AGENT : ''),
+      rowGroup: groupByAgent,
+      hide: groupByAgent || narrow,
+      width: 130,
+      cellClass: 'muted',
+    }
+
+    // the trust score: only filled in on group rows, see HeldRateCell
+    const heldColumn: ColDef<Order> = {
+      headerName: 'Held by Leash',
+      colId: 'held',
+      valueGetter: (params) => (params.data ? (wasHeld(params.data) ? 1 : 0) : null),
+      aggFunc: heldRateAgg,
+      cellRenderer: HeldRateCell,
+      hide: !groupByAgent,
+      // sorting groups by it puts the least trusted agent on top
+      comparator: (a, b) => {
+        const rateA = a && typeof a === 'object' && a.total ? a.held / a.total : 0
+        const rateB = b && typeof b === 'object' && b.total ? b.held / b.total : 0
+        return rateA - rateB
+      },
+      width: 150,
+    }
+
     return [
+      heldColumn,
       ...leadColumns,
+      agentColumn,
       {
         headerName: 'Risk',
         colId: 'risk',
@@ -217,7 +263,16 @@ export function DashboardPage() {
         width: 140,
       },
     ]
-  }, [narrow])
+  }, [narrow, groupByAgent])
+
+  // the column grouped rows show in: the agent's name and how many orders are under it
+  const autoGroupColumnDef = useMemo<ColDef<Order>>(
+    () => ({
+      headerName: 'Agent',
+      minWidth: 190,
+    }),
+    [],
+  )
 
   const defaultColDef = useMemo<ColDef<Order>>(
     () => ({
@@ -363,6 +418,14 @@ export function DashboardPage() {
                 ))}
               </div>
               <div className="grid-toolbar__end">
+                <button
+                  type="button"
+                  className="segmented__button segmented__button--solo"
+                  aria-pressed={groupByAgent}
+                  onClick={() => setGroupByAgent((value) => !value)}
+                >
+                  Group by agent
+                </button>
                 <span className={'live' + (stale ? ' live--stale' : '')} role="status">
                   <span className="live__dot" aria-hidden="true" />
                   {stale ? 'Reconnecting...' : 'Live'}
@@ -385,6 +448,9 @@ export function DashboardPage() {
                 columnDefs={columnDefs}
                 defaultColDef={defaultColDef}
                 getRowId={(params) => String(params.data.id)}
+                autoGroupColumnDef={autoGroupColumnDef}
+                groupDefaultExpanded={-1}
+                suppressAggFuncInHeader
                 rowHeight={60}
                 headerHeight={40}
                 domLayout="autoHeight"
