@@ -16,8 +16,9 @@ import {
 } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { listOrders } from '../api'
+import { getStats, listOrders } from '../api'
 import { OrderPanel } from '../components/OrderPanel'
+import { StatsTiles } from '../components/StatsTiles'
 import {
   DecideTimeCell,
   DecisionCell,
@@ -110,6 +111,7 @@ function useNarrowScreen(): boolean {
 
 // stable loader identity so the poll doesn't restart on every render
 const loadOrders = () => listOrders()
+const loadStats = () => getStats()
 
 // how often the grid asks for fresh orders. fast enough that an approve on the phone shows up on the
 // laptop while you're still looking, slow enough to be nothing for the API
@@ -121,6 +123,7 @@ const FLASH_MS = 2400
 // Merchant view: every agent order, what the check said, and what the human did about it.
 export function DashboardPage() {
   const { state: orders, stale } = usePolling(loadOrders, POLL_MS)
+  const { state: stats } = usePolling(loadStats, POLL_MS)
   const gridRef = useRef<AgGridReact<Order>>(null)
   // each row's status as of the last poll, so we can tell which rows just changed.
   // null until the first load, which shouldn't flash anything
@@ -316,6 +319,8 @@ export function DashboardPage() {
           </p>
         </div>
       </div>
+
+      <StatsTiles stats={stats} />
 
       <div className="card">
         {orders.status === 'loading' && <p className="state">Loading orders...</p>}

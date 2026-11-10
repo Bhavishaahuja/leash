@@ -266,3 +266,24 @@ export interface DisputeEvidence {
   // Claude's draft for the PayPal reviewer. exactly what submit sends as the notes
   summary: string
 }
+
+// GET /stats: dashboard counts plus where the rubber-stamp watch stands
+export interface Stats {
+  total_orders: number
+  // captured by Leash on its own, no human involved
+  auto_captured: number
+  // holds waiting on a human right now
+  needs_review: number
+  approved: number
+  // every order whose hold was released
+  voided: number
+  // over every human decision the server timed. null until there is one
+  median_decision_ms: number | null
+  // fast approvals in a row, newest first
+  fast_streak: number
+  rubber_stamp_active: boolean
+  // an approval under this counts as fast
+  fast_threshold_ms: number
+  // the last 10 human decisions, newest first. null on old rows with no timing
+  recent_decision_ms: (number | null)[]
+}

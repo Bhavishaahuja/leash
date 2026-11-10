@@ -16,6 +16,7 @@ import type {
   PlacedOrder,
   ReviewLink,
   ReviewView,
+  Stats,
 } from './types'
 
 const API_URL = (import.meta.env.VITE_API_URL ?? 'http://127.0.0.1:8000').replace(/\/+$/, '')
@@ -371,6 +372,82 @@ export async function listOrders(limit = 50): Promise<Order[]> {
     return mockDelay(plain)
   }
   return request<Order[]>('/orders?limit=' + limit)
+}
+
+// same numbers the backend works out in stats.py, from the mock orders
+function mockStats(): Stats {
+  const counts = { total: 0, auto: 0, review: 0, approved: 0, voided: 0 }
+  const humanDecisions: { decidedAt: string; ms: number | null; action: ApprovalAction }[] = []
+  for (const order of mockStore) {
+    counts.total += 1
+    if (order.review_state === 'auto_approved') {
+      counts.auto += 1
+    }
+    if (isWaitingForReview(order)) {
+      counts.review += 1
+    }
+    if (order.review_state === 'approved') {
+      counts.approved += 1
+    }
+    if (order.status === 'voided') {
+      counts.voided += 1
+    }
+    const approval = order.approval
+    if (approval?.action && approval.decided_at) {
+      humanDecisions.push({ decidedAt: approval.decided_at, ms: approval.decision_ms, action: approval.action })
+    }
+  }
+
+  // newest first, last 10, like rubber_stamp.load_recent_decisions
+  humanDecisions.sort((a, b) => b.decidedAt.localeCompare(a.decidedAt))
+  const recent = humanDecisions.slice(0, 10)
+  const fastThresholdMs = 2000
+  let fastStreak = 0
+  for (const decision of recent) {
+    // a reject or a slow (or untimed) approval ends the streak
+    if (decision.action !== 'approve' || decision.ms === null || decision.ms >= fastThresholdMs) {
+      break
+    }
+    fastStreak += 1
+  }
+
+  const timings: number[] = []
+  for (const decision of humanDecisions) {
+    if (decision.ms !== null) {
+      timings.push(decision.ms)
+    }
+  }
+  timings.sort((a, b) => a - b)
+  let median: number | null = null
+  if (timings.length > 0) {
+    const middle = Math.floor(timings.length / 2)
+    median = timings.length % 2 === 1 ? timings[middle] : Math.round((timings[middle - 1] + timings[middle]) / 2)
+  }
+
+  const recentMs: (number | null)[] = []
+  for (const decision of recent) {
+    recentMs.push(decision.ms)
+  }
+
+  return {
+    total_orders: counts.total,
+    auto_captured: counts.auto,
+    needs_review: counts.review,
+    approved: counts.approved,
+    voided: counts.voided,
+    median_decision_ms: median,
+    fast_streak: fastStreak,
+    rubber_stamp_active: fastStreak >= 3,
+    fast_threshold_ms: fastThresholdMs,
+    recent_decision_ms: recentMs,
+  }
+}
+
+export async function getStats(): Promise<Stats> {
+  if (USE_MOCKS) {
+    return mockDelay(mockStats())
+  }
+  return request<Stats>('/stats')
 }
 
 export async function getOrder(orderId: number): Promise<OrderDetail> {
