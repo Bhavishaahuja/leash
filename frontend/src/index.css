@@ -348,6 +348,88 @@ p {
   box-shadow: inset 3px 0 0 var(--review);
 }
 
+/* a row that just changed status flashes its new color, then fades back. FLASH_MS in
+   DashboardPage.tsx matches the animation length */
+.grid-wrap .row--flash {
+  animation: row-flash 2.4s ease-out;
+}
+
+.grid-wrap .row--flash-needs_review {
+  --flash-color: var(--review-bg);
+}
+
+.grid-wrap .row--flash-authorized,
+.grid-wrap .row--flash-created {
+  --flash-color: var(--authorized-bg);
+}
+
+.grid-wrap .row--flash-captured {
+  --flash-color: var(--captured-bg);
+}
+
+.grid-wrap .row--flash-voided {
+  --flash-color: var(--voided-bg);
+}
+
+.grid-wrap .row--flash-failed {
+  --flash-color: var(--failed-bg);
+}
+
+@keyframes row-flash {
+  0%,
+  40% {
+    background-color: var(--flash-color);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .grid-wrap .row--flash {
+    animation-duration: 0.01s;
+  }
+}
+
+.grid-toolbar__end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* tells the merchant the grid updates by itself */
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 550;
+  color: var(--ink-muted);
+}
+
+.live__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--captured);
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+.live--stale .live__dot {
+  background: var(--authorized);
+  animation: none;
+}
+
+@keyframes live-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live__dot {
+    animation: none;
+  }
+}
+
 .num,
 .num-cell {
   text-align: right;

@@ -10,7 +10,9 @@ import {
   themeQuartz,
   type ColDef,
   type IRowNode,
+  type RowClassParams,
   type RowClickedEvent,
+  type RowDataUpdatedEvent,
 } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -27,7 +29,7 @@ import {
 } from '../components/orderCells'
 import { buyerName, formatTime, summarizeItems } from '../lib/format'
 import { DECISION_LABELS, decisionKind, decisionMs, displayStatus } from '../lib/orderState'
-import { useAsync } from '../lib/useAsync'
+import { usePolling } from '../lib/usePolling'
 import type { Order } from '../types'
 
 // only the grid features we use, so the bundle stays small. ValidationModule only runs in dev
@@ -106,13 +108,26 @@ function useNarrowScreen(): boolean {
   return narrow
 }
 
-// stable loader identity so useAsync fetches once
+// stable loader identity so the poll doesn't restart on every render
 const loadOrders = () => listOrders()
+
+// how often the grid asks for fresh orders. fast enough that an approve on the phone shows up on the
+// laptop while you're still looking, slow enough to be nothing for the API
+const POLL_MS = 4000
+
+// how long a changed row keeps its flash class. matches the row-flash animation in index.css
+const FLASH_MS = 2400
 
 // Merchant view: every agent order, what the check said, and what the human did about it.
 export function DashboardPage() {
-  const orders = useAsync(loadOrders)
+  const { state: orders, stale } = usePolling(loadOrders, POLL_MS)
   const gridRef = useRef<AgGridReact<Order>>(null)
+  // each row's status as of the last poll, so we can tell which rows just changed.
+  // null until the first load, which shouldn't flash anything
+  const lastStatuses = useRef<Map<number, string> | null>(null)
+  // rows flashing right now: order id to the status it flashes as
+  const flashing = useRef<Map<number, string>>(new Map())
+  const flashTimers = useRef<ReturnType<typeof setTimeout>[]>([])
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
@@ -225,6 +240,57 @@ export function DashboardPage() {
     }
   }, [])
 
+  useEffect(() => {
+    const timers = flashTimers.current
+    return () => {
+      for (const timer of timers) {
+        clearTimeout(timer)
+      }
+    }
+  }, [])
+
+  // runs after the grid has applied a poll. getRowId means it only touched rows that changed, so
+  // selection and scroll stay put. here we just find which rows are new or changed status and
+  // flash them in their new color: amber when a hold lands, green on capture, gray on void
+  const onRowDataUpdated = useCallback((event: RowDataUpdatedEvent<Order>) => {
+    const nextStatuses = new Map<number, string>()
+    const changedNodes: IRowNode<Order>[] = []
+    event.api.forEachNode((node) => {
+      if (!node.data) {
+        return
+      }
+      const status = displayStatus(node.data)
+      nextStatuses.set(node.data.id, status)
+      const before = lastStatuses.current?.get(node.data.id)
+      if (lastStatuses.current !== null && before !== status) {
+        flashing.current.set(node.data.id, status)
+        changedNodes.push(node)
+      }
+    })
+    lastStatuses.current = nextStatuses
+    if (changedNodes.length === 0) {
+      return
+    }
+
+    // redraw rebuilds the row element, so the CSS animation plays from the start
+    event.api.redrawRows({ rowNodes: changedNodes })
+    const timer = setTimeout(() => {
+      for (const node of changedNodes) {
+        if (node.data) {
+          flashing.current.delete(node.data.id)
+        }
+      }
+      // gridRef, not event.api: the grid may have been rebuilt since
+      gridRef.current?.api?.redrawRows({ rowNodes: changedNodes })
+    }, FLASH_MS)
+    flashTimers.current.push(timer)
+  }, [])
+
+  const getRowClass = useCallback((params: RowClassParams<Order>) => {
+    const status = params.data ? flashing.current.get(params.data.id) : undefined
+    return status ? 'row--flash row--flash-' + status : undefined
+  }, [])
+
   const closePanel = useCallback(() => {
     setSelectedId(null)
     gridRef.current?.api.deselectAll()
@@ -278,14 +344,20 @@ export function DashboardPage() {
                   </button>
                 ))}
               </div>
-              <input
-                type="search"
-                className="search"
-                placeholder="Search item, buyer or order #"
-                aria-label="Search orders"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
+              <div className="grid-toolbar__end">
+                <span className={'live' + (stale ? ' live--stale' : '')} role="status">
+                  <span className="live__dot" aria-hidden="true" />
+                  {stale ? 'Reconnecting...' : 'Live'}
+                </span>
+                <input
+                  type="search"
+                  className="search"
+                  placeholder="Search item, buyer or order #"
+                  aria-label="Search orders"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </div>
             </div>
             <div className="grid-wrap">
               <AgGridReact<Order>
@@ -303,6 +375,8 @@ export function DashboardPage() {
                 doesExternalFilterPass={doesExternalFilterPass}
                 rowSelection={{ mode: 'singleRow', checkboxes: false, enableClickSelection: true }}
                 rowClassRules={{ 'row--needs-review': (params) => params.data?.review_state === 'needs_review' }}
+                getRowClass={getRowClass}
+                onRowDataUpdated={onRowDataUpdated}
                 onRowClicked={openOrder}
                 onCellKeyDown={(event) => {
                   // Enter on a focused row opens it, same as a click
