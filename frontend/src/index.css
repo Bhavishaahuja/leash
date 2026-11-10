@@ -1987,6 +1987,30 @@ p {
   line-height: 1.55;
 }
 
+.dispute-panel__download {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 12px;
+}
+
+.disputes-empty {
+  max-width: 60ch;
+  margin: 0 auto;
+}
+
+.disputes-empty__title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.disputes-empty__note {
+  font-size: 14px;
+  color: var(--ink-faint);
+}
+
 .dispute-panel__actions {
   display: flex;
   flex-wrap: wrap;

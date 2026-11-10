@@ -844,6 +844,45 @@ def test_submit_404s_on_an_unknown_dispute(client):
     assert client.post("/disputes/999/submit-evidence").status_code == 404
 
 
+# ---- downloading the PDF ----
+
+
+def test_download_is_the_pdf_submit_sends(client, db_sessions, paypal):
+    dispute_id = ready_to_submit(db_sessions, paypal)
+
+    response = client.get("/disputes/" + str(dispute_id) + "/evidence.pdf")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["cache-control"] == "no-store"
+    disposition = response.headers["content-disposition"]
+    assert disposition.startswith("attachment; filename=")
+    assert response.content.startswith(b"%PDF-1.4")
+    # looking doesn't file anything
+    assert paypal.evidence_calls == []
+
+    client.post("/disputes/" + str(dispute_id) + "/submit-evidence")
+    filed = paypal.evidence_calls[0]
+    assert response.content == filed["file_bytes"]
+    assert disposition == 'attachment; filename="' + filed["file_name"] + '"'
+
+
+def test_download_needs_no_summary_and_no_claude(client, db_sessions, claude):
+    # straight after a sync: nothing drafted yet. the PDF is only Leash's records
+    dispute_id = add_dispute_row(db_sessions)
+
+    response = client.get("/disputes/" + str(dispute_id) + "/evidence.pdf")
+
+    assert response.status_code == 200
+    assert b"Black trail runners" in response.content
+    assert claude.requests == []
+    assert saved_dispute(db_sessions, dispute_id).evidence_summary is None
+
+
+def test_download_404s_on_an_unknown_dispute(client):
+    assert client.get("/disputes/999/evidence.pdf").status_code == 404
+
+
 # ---- merchant only ----
 
 
@@ -853,6 +892,7 @@ def test_submit_404s_on_an_unknown_dispute(client):
     ("GET", "/disputes/1/evidence"),
     ("POST", "/disputes/1/redraft"),
     ("POST", "/disputes/1/submit-evidence"),
+    ("GET", "/disputes/1/evidence.pdf"),
 ])
 def test_every_dispute_route_is_merchant_only(app, db_sessions, paypal, claude, method, path):
     ready_to_submit(db_sessions, paypal)

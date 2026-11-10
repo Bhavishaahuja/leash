@@ -4,6 +4,7 @@
 #   GET  /disputes                         the dashboard list
 #   POST /disputes/sync                    look up disputes by capture id and save them
 #   GET  /disputes/{id}/evidence           the packet plus a Claude-drafted summary. no PayPal write
+#   GET  /disputes/{id}/evidence.pdf       the PDF submit sends, to download. no PayPal write
 #   POST /disputes/{id}/submit-evidence    PDF of the packet + the summary as notes, once only
 #
 # PayPal rules, from the Disputes v1 schema, the usage guide and spike 3 (spikes/README.md):
@@ -21,7 +22,7 @@
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -624,6 +625,32 @@ def get_evidence(dispute_id: int, session: DbSession, claude: Claude):
     return EvidenceOut(dispute=dispute_out(dispute), packet=packet, summary=summary)
 
 
+def evidence_file(dispute):
+    # (file name, PDF bytes). submit and the download both build it here, so the file the
+    # merchant downloads is byte for byte the one PayPal gets
+    packet = build_evidence_packet(dispute)
+    file_name = evidence_pdf.evidence_file_name(dispute.paypal_dispute_id)
+    return file_name, evidence_pdf.build_pdf(packet_lines(packet))
+
+
+@router.get("/{dispute_id}/evidence.pdf")
+def download_evidence_pdf(dispute_id: int, session: DbSession):
+    # read only: no PayPal call, no Claude call, works before and after filing. the PDF is just
+    # Leash's own records, the summary goes to PayPal separately as the notes
+    dispute = load_dispute(session, dispute_id)
+    file_name, pdf_bytes = evidence_file(dispute)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            # evidence_file_name only allows letters, digits, - and _, so no quoting trouble
+            "Content-Disposition": 'attachment; filename="' + file_name + '"',
+            # it's someone's order history, don't let a shared cache keep it
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @router.post("/{dispute_id}/redraft", response_model=EvidenceOut)
 def redraft_evidence(dispute_id: int, session: DbSession, claude: Claude):
     # replaces the saved draft with a new one, on purpose
@@ -696,9 +723,7 @@ def submit_evidence(dispute_id: int, session: DbSession, paypal: PayPal):
             "requested_types": requested_evidence_types(details),
         })
 
-    packet = build_evidence_packet(dispute)
-    file_name = evidence_pdf.evidence_file_name(paypal_dispute_id)
-    pdf_bytes = evidence_pdf.build_pdf(packet_lines(packet))
+    file_name, pdf_bytes = evidence_file(dispute)
     notes = build_notes(dispute.evidence_summary, evidence_type, requested_evidence_types(details))
     evidence_input = {"evidences": [{
         "evidence_type": evidence_type,
