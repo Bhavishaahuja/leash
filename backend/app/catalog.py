@@ -134,6 +134,12 @@ def other_event_date(rows, wanted_date):
     return best_date
 
 
+def format_event_date(event_date):
+    # "Dec 5, 2026". built by hand because %-d doesn't exist on Windows. lives here so fixes.py
+    # and orders.py both get it without importing each other
+    return event_date.strftime("%b") + " " + str(event_date.day) + ", " + str(event_date.year)
+
+
 def parse_event_date(value):
     # the parser writes "2026-12-05". anything else isn't a date we can move by a day
     if isinstance(value, date):

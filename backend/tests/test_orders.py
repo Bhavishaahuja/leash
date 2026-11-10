@@ -1324,7 +1324,7 @@ def test_every_order_response_has_the_same_shape(client, paypal):
     }
     assert set(listed["intent_check"]) == {
         "id", "verdict", "risk_score", "reason", "mismatched_fields", "rule_results",
-        "latency_ms", "checked_by", "created_at",
+        "latency_ms", "checked_by", "suggested_fix", "created_at",
     }
     assert set(listed["approval"]) == {
         "id", "action", "decided_by", "opened_at", "decided_at", "decision_ms",

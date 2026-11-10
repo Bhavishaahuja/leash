@@ -221,6 +221,7 @@ function toReviewView(order: OrderDetail): ReviewView {
           risk_score: check.risk_score,
           reason: check.reason,
           mismatched_fields: check.mismatched_fields,
+          suggested_fix: check.suggested_fix,
         }
       : null,
   }

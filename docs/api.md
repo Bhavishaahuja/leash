@@ -178,6 +178,21 @@ Review links only work when `status` is `authorized` and `review_state` is `need
 | `rule_results` | list or `null` | Every hard rule, including the ones that passed. Empty if the rules themselves crashed |
 | `latency_ms` | int or `null` | How long the whole check took |
 | `checked_by` | `rules`, `ai` | Note: this used to be `claude` |
+| `suggested_fix` | object or `null` | What the agent should have bought, see below. Only on orders that went to a human |
+
+`suggested_fix` comes from the store's catalog in plain code, never from Claude. It's an in-stock item at the same store that matches every field the shopper named and keeps the total inside the cap, at the price closest to what the agent paid. It's `null` when nothing fits, when the problem isn't one an item can fix (the wrong store, an expired mandate, text that tried to instruct the checker), on orders that were auto-captured, and on decisions saved before it existed. It never changes the order.
+
+```json
+{
+  "sku": "FW-SNK-WHI-9",
+  "item": "Canvas low-top sneaker",
+  "price": "64.00",
+  "quantity": 1,
+  "sentence": "Agent picked size 8.5, mandate says 9. Size 9 is in stock at the same price."
+}
+```
+
+`price` is the catalog's price for one unit, a string like the other money fields. `sentence` is one line written for the human deciding.
 
 `reason` can end in `(+2 more)` when several rules failed. The full list is in `rule_results`.
 
@@ -401,12 +416,13 @@ What the confirm page shows. It's read only and changes nothing, so a link previ
     "verdict": "mismatch",
     "risk_score": 90,
     "reason": "Ordered red, mandate says black",
-    "mismatched_fields": ["color"]
+    "mismatched_fields": ["color"],
+    "suggested_fix": null
   }
 }
 ```
 
-`intent_check` can be `null`, so handle a missing reason. `authorization_expires_at` is also when the link stops working.
+`intent_check` can be `null`, so handle a missing reason. `suggested_fix` has the same shape as on the order, and is often `null`. `authorization_expires_at` is also when the link stops working.
 
 | Code | When |
 |---|---|

@@ -200,6 +200,9 @@ class Decision(Base):
     rule_results: Mapped[list | None] = mapped_column(JSON)
     # how long the whole check took
     latency_ms: Mapped[int | None] = mapped_column(Integer)
+    # what the agent should have bought, from fixes.find_fix: {sku, item, price, quantity,
+    # sentence}. only on orders that went to a human, and null when nothing in the catalog fits
+    suggested_fix: Mapped[dict | None] = mapped_column(JSON)
     checked_by: Mapped[CheckedBy] = mapped_column(string_enum(CheckedBy, "checked_by"))
     created_at: Mapped[datetime] = created_at_column()
 

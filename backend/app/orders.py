@@ -37,7 +37,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
-from backend.app import mandate_parser, rubber_stamp
+from backend.app import fixes, mandate_parser, rubber_stamp
+from backend.app.catalog import format_event_date
 from backend.app.auth import AgentName, require_agent, require_merchant
 from backend.app.config import STORE_NAME, get_settings
 from backend.app.db import get_session
@@ -112,6 +113,15 @@ class RuleResultOut(BaseModel):
     reason: str
 
 
+class SuggestedFixOut(BaseModel):
+    # see fixes.find_fix. price is the catalog's, for one unit
+    sku: str
+    item: str
+    price: Decimal
+    quantity: int
+    sentence: str
+
+
 class DecisionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -124,6 +134,8 @@ class DecisionOut(BaseModel):
     rule_results: list[RuleResultOut] | None
     latency_ms: int | None
     checked_by: CheckedBy
+    # null unless the order went to a human and the catalog has something that fits the mandate
+    suggested_fix: SuggestedFixOut | None = None
     created_at: datetime
 
 
@@ -257,11 +269,6 @@ def item_display_name(item):
     if item.event_date:
         parts.append(format_event_date(item.event_date))
     return ", ".join(parts)
-
-
-def format_event_date(event_date):
-    # "Dec 5, 2026". built by hand because %-d doesn't exist on Windows
-    return event_date.strftime("%b") + " " + str(event_date.day) + ", " + str(event_date.year)
 
 
 def build_paypal_order(order_id, items, shipping, vault_id, settings):
@@ -599,6 +606,27 @@ def check_and_decide(session, order, paypal, claude):
     except SQLAlchemyError:
         session.rollback()
         logger.exception("Auto-decide failed for order %s, sending to review", order_id)
+
+    attach_suggested_fix(session, order_id)
+
+
+def attach_suggested_fix(session, order_id):
+    # only once the order is known to be going to a human: a captured order needs no fix. a
+    # suggestion is a nice-to-have, so nothing that goes wrong in here can fail the request
+    try:
+        order = load_order(session, order_id)
+        check = order.intent_check
+        if check is None or order.review_state != ReviewState.needs_review:
+            return
+        if order.status != OrderStatus.authorized:
+            return
+        fix = fixes.find_fix(session, order.mandate, order, check.mismatched_fields or [])
+        if fix is not None:
+            check.suggested_fix = fix
+            session.commit()
+    except Exception:
+        session.rollback()
+        logger.exception("Couldn't work out a suggested fix for order %s", order_id)
 
 
 def watch_for(session, order_id):

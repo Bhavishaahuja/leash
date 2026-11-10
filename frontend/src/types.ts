@@ -62,6 +62,19 @@ export interface RuleResult {
   reason: string
 }
 
+// what the agent should have bought, worked out from the catalog (never by Claude). only on orders
+// that went to a human, and only when something in stock fits the whole mandate
+export interface SuggestedFix {
+  sku: string
+  item: string
+  // the catalog's price for one unit, a decimal string like "64.00"
+  price: string
+  quantity: number
+  // one line for the human, like "Agent picked size 8.5, mandate says 9. Size 9 is in stock at
+  // the same price."
+  sentence: string
+}
+
 export interface Decision {
   id: number
   verdict: Verdict
@@ -74,6 +87,7 @@ export interface Decision {
   rule_results: RuleResult[] | null
   latency_ms: number | null
   checked_by: CheckedBy
+  suggested_fix: SuggestedFix | null
   created_at: string
 }
 
@@ -164,6 +178,7 @@ export interface ReviewView {
     risk_score: number | null
     reason: string
     mismatched_fields: string[] | null
+    suggested_fix: SuggestedFix | null
   } | null
 }
 

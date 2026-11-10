@@ -79,6 +79,7 @@ interface DecisionInput {
   ruleResults?: RuleResult[]
   latencyMs: number
   createdMinutesAgo: number
+  suggestedFix?: Decision['suggested_fix']
 }
 
 function decision(input: DecisionInput): Decision {
@@ -91,6 +92,7 @@ function decision(input: DecisionInput): Decision {
     rule_results: input.ruleResults ?? hardRules(),
     latency_ms: input.latencyMs,
     checked_by: input.checkedBy,
+    suggested_fix: input.suggestedFix ?? null,
     created_at: minutesAgo(input.createdMinutesAgo),
   }
 }

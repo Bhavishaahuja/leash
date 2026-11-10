@@ -69,6 +69,8 @@ class ReviewCheck(BaseModel):
     risk_score: int | None
     reason: str
     mismatched_fields: list[str] | None
+    # what the agent should have bought, so the human has something better than "no" to go on
+    suggested_fix: orders.SuggestedFixOut | None = None
 
 
 class ReviewView(BaseModel):
