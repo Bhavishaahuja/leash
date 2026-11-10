@@ -89,6 +89,24 @@ interface RequestOptions {
   withSession?: boolean
 }
 
+async function throwApiError(response: Response, withSession: boolean): Promise<never> {
+  // an expired session is no use to the next request either. a wrong password is a 401 too, and
+  // dropping nothing is harmless there
+  if (response.status === 401 && withSession) {
+    writeSessionToken(null)
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
+  }
+
+  let detail: unknown = null
+  try {
+    const body = await response.json()
+    detail = body?.detail ?? body
+  } catch {
+    // body wasn't JSON, the status code will have to do
+  }
+  throw new ApiError(response.status, detail)
+}
+
 async function request<T>(path: string, init?: RequestInit, options: RequestOptions = {}): Promise<T> {
   const withSession = options.withSession ?? true
   const token = withSession ? readSessionToken() : null
@@ -102,21 +120,7 @@ async function request<T>(path: string, init?: RequestInit, options: RequestOpti
   })
 
   if (!response.ok) {
-    // an expired session is no use to the next request either. a wrong password is a 401 too, and
-    // dropping nothing is harmless there
-    if (response.status === 401 && withSession) {
-      writeSessionToken(null)
-      window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
-    }
-
-    let detail: unknown = null
-    try {
-      const body = await response.json()
-      detail = body?.detail ?? body
-    } catch {
-      // body wasn't JSON, the status code will have to do
-    }
-    throw new ApiError(response.status, detail)
+    await throwApiError(response, withSession)
   }
 
   // POST /review/{token}/opened is a 204 with no body
@@ -705,6 +709,70 @@ export async function redraftDisputeEvidence(disputeId: number): Promise<Dispute
     return mockDelay(mockEvidence(disputeId, true))
   }
   return request<DisputeEvidence>('/disputes/' + disputeId + '/redraft', { method: 'POST' })
+}
+
+export interface DownloadedFile {
+  blob: Blob
+  fileName: string
+}
+
+// a tiny one-page PDF so the download works in mock mode too. ASCII only, so string length is
+// byte length and the xref offsets come out right
+function mockEvidencePdf(dispute: Dispute): Blob {
+  const lines = [
+    'Leash evidence packet (sample data)',
+    'Dispute ' + dispute.paypal_dispute_id + ', order #' + dispute.order_id,
+    'The real file lists the mandate, the order, the check and who released the money.',
+  ]
+  let text = 'BT /F1 11 Tf 60 740 Td 15 TL\n'
+  for (const line of lines) {
+    const safe = line.replace(/[^\x20-\x7e]/g, '?').replace(/([()\\])/g, '\\$1')
+    text += '(' + safe + ') Tj T*\n'
+  }
+  text += 'ET'
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [4 0 R] /Count 1 >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>',
+    '<< /Length ' + text.length + ' >>\nstream\n' + text + '\nendstream',
+  ]
+  let pdf = '%PDF-1.4\n'
+  const offsets: number[] = []
+  for (let index = 0; index < objects.length; index++) {
+    offsets.push(pdf.length)
+    pdf += index + 1 + ' 0 obj\n' + objects[index] + '\nendobj\n'
+  }
+  const xrefStart = pdf.length
+  pdf += 'xref\n0 ' + (objects.length + 1) + '\n0000000000 65535 f \n'
+  for (const offset of offsets) {
+    pdf += String(offset).padStart(10, '0') + ' 00000 n \n'
+  }
+  pdf += 'trailer\n<< /Size ' + (objects.length + 1) + ' /Root 1 0 R >>\nstartxref\n' + xrefStart + '\n%%EOF\n'
+  return new Blob([pdf], { type: 'application/pdf' })
+}
+
+// the evidence PDF, the same file submit sends PayPal. a plain link can't carry the session
+// header, so this fetches it and the page saves the blob
+export async function downloadDisputeEvidencePdf(disputeId: number): Promise<DownloadedFile> {
+  if (USE_MOCKS) {
+    const dispute = findMockDispute(disputeId)
+    return mockDelay({ blob: mockEvidencePdf(dispute), fileName: 'leash-evidence-' + dispute.paypal_dispute_id + '.pdf' })
+  }
+  const token = readSessionToken()
+  const response = await fetch(API_URL + '/disputes/' + disputeId + '/evidence.pdf', {
+    headers: {
+      Accept: 'application/pdf',
+      ...(token ? { Authorization: 'Bearer ' + token } : {}),
+    },
+  })
+  if (!response.ok) {
+    await throwApiError(response, true)
+  }
+  // the server names it after the PayPal dispute id, keep that name if the header is readable
+  const disposition = response.headers.get('Content-Disposition') ?? ''
+  const match = /filename="([^"]+)"/.exec(disposition)
+  return { blob: await response.blob(), fileName: match ? match[1] : 'leash-evidence-' + disputeId + '.pdf' }
 }
 
 // files the PDF and summary with PayPal. PayPal takes this once

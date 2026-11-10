@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import {
+  downloadDisputeEvidencePdf,
   getDisputeEvidence,
   listDisputes,
   redraftDisputeEvidence,
@@ -62,6 +63,19 @@ function chipTone(dispute: Dispute): string {
     return 'voided'
   }
   return 'authorized'
+}
+
+// hands a fetched file to the browser as a download
+function saveFile(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  // give the browser a moment to start the download before the URL goes away
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 function daysLeft(iso: string): string {
@@ -136,7 +150,18 @@ export function DisputesPage() {
       )}
       {disputes.status === 'ready' && disputes.data.length === 0 && (
         <div className="card">
-          <p className="state">No disputes yet. Check PayPal to look for new ones.</p>
+          <div className="state disputes-empty">
+            <p className="disputes-empty__title">No disputes on record</p>
+            <p>
+              That's good news. When a buyer disputes a captured order in PayPal, press Check PayPal for disputes to
+              pull it in here. Leash then answers with what the buyer asked for, how the order was checked and who
+              released the money.
+            </p>
+            <p className="disputes-empty__note">
+              Testing in the sandbox? Open a dispute as the sandbox buyer on an order Leash captured, then check
+              again. A new dispute can take a minute or two to show up.
+            </p>
+          </div>
         </div>
       )}
       {disputes.status === 'ready' && disputes.data.length > 0 && (
@@ -212,6 +237,8 @@ function EvidencePanel({ disputeId, onFiled }: { disputeId: number; onFiled: () 
   const [busy, setBusy] = useState<'redraft' | 'submit' | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
 
   let state: PanelState = { status: 'loading' }
   if (latest) {
@@ -273,6 +300,19 @@ function EvidencePanel({ disputeId, onFiled }: { disputeId: number; onFiled: () 
     } finally {
       setBusy(null)
       setConfirming(false)
+    }
+  }
+
+  async function downloadPdf() {
+    setDownloading(true)
+    setDownloadError(null)
+    try {
+      const file = await downloadDisputeEvidencePdf(disputeId)
+      saveFile(file.blob, file.fileName)
+    } catch (caught) {
+      setDownloadError(caught instanceof Error ? caught.message : 'Download failed')
+    } finally {
+      setDownloading(false)
     }
   }
 
@@ -344,6 +384,19 @@ function EvidencePanel({ disputeId, onFiled }: { disputeId: number; onFiled: () 
       <p className="eyebrow">Summary for the PayPal reviewer</p>
       <p className="dispute-panel__summary">{summary || 'No summary saved.'}</p>
       <p className="muted">Filed as the notes, with the four parts above attached as a PDF.</p>
+      <div className="dispute-panel__download">
+        <button type="button" className="secondary-button" onClick={downloadPdf} disabled={downloading}>
+          {downloading ? 'Preparing PDF...' : 'Download PDF'}
+        </button>
+        <span className="muted">
+          {dispute.evidence_submitted ? 'The same file PayPal has.' : 'The same file PayPal gets when you file.'}
+        </span>
+      </div>
+      {downloadError && (
+        <p className="form-error" role="alert">
+          Couldn't download the PDF: {downloadError}
+        </p>
+      )}
 
       {actionError && (
         <p className="form-error" role="alert">

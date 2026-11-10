@@ -294,9 +294,9 @@ The watch is global, not per shopper.
 
 ## Disputes
 
-When a buyer disputes a captured order, Leash files its records with PayPal as evidence: what the buyer authorized, what was ordered, how it was checked, and who released the money. All five routes are merchant only.
+When a buyer disputes a captured order, Leash files its records with PayPal as evidence: what the buyer authorized, what was ordered, how it was checked, and who released the money. All six routes are merchant only.
 
-The usual flow is: sync, open the evidence (the first look drafts the summary), read it, redraft if it needs another go, then submit.
+The usual flow is: sync, open the evidence (the first look drafts the summary), read it, redraft if it needs another go, download the PDF if you want to see the file itself, then submit.
 
 ### The dispute object
 
@@ -370,6 +370,14 @@ No body. Drafts a new summary on purpose and saves it in place of the old one. T
 | `409` | Evidence was already submitted, or a submit is in progress. The saved summary is left alone |
 | `502` | Claude couldn't draft one. The old draft is kept |
 | `404` | No such dispute |
+
+### `GET /disputes/{id}/evidence.pdf`
+
+The evidence PDF, for the merchant to download and read. It's built the same way submit builds it, so it's byte for byte the file PayPal gets (or got). Nothing is sent to PayPal and Claude isn't called, so it works straight after a sync, before any summary is drafted, and after filing.
+
+Success is a `200` with `Content-Type: application/pdf`, `Content-Disposition: attachment; filename="leash-evidence-<PayPal dispute id>.pdf"` and `Cache-Control: no-store`. The PDF holds the packet only. The summary goes to PayPal separately, as the notes. `404` if there's no such dispute.
+
+The dashboard fetches it with the session header and saves the result, since a plain link can't send `Authorization`.
 
 ### `POST /disputes/{id}/submit-evidence`
 
