@@ -121,6 +121,91 @@ p {
   color: var(--ink);
 }
 
+/* a button styled as a nav link. the short label is for phones, see the 640px query */
+.topbar__reset {
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.topbar__reset:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.topbar__reset-short {
+  display: none;
+}
+
+/* the reset confirm, a full-width strip under the header */
+.reset-strip--empty {
+  display: none;
+}
+
+.reset-strip {
+  border-top: 1px solid var(--border);
+  background: var(--surface-sunk);
+}
+
+.reset-strip--confirming,
+.reset-strip--resetting {
+  background: var(--failed-bg);
+}
+
+.reset-strip__inner {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 10px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+}
+
+.reset-strip__text {
+  flex: 1 1 320px;
+  margin: 0;
+  color: var(--ink);
+}
+
+.reset-strip__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.danger-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--failed);
+  color: #ffffff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.danger-button:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.danger-button:focus-visible,
+.topbar__reset:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.login__hint {
+  margin: -8px 0 16px;
+  color: var(--ink-muted);
+  font-size: 14px;
+}
+
 .topbar__link.active {
   background: var(--primary-soft);
   color: var(--primary);
@@ -258,6 +343,7 @@ p {
 }
 
 /* a thin left rule on rows that need a human, so they stand out without shouting */
+/* impeccable-disable-next-line side-tab -- status cue for held rows, intentional */
 .grid-wrap .row--needs-review .ag-cell:first-child {
   box-shadow: inset 3px 0 0 var(--review);
 }
@@ -853,13 +939,24 @@ p {
   margin-top: 4px;
 }
 
+/* the shopper's own words. set apart by italics and curly quotes instead of a colored side rule.
+   ink-muted on surface-sunk is 4.82:1, inside WCAG AA for this size */
 .quote {
   margin: 0;
   padding: 12px 14px;
   background: var(--surface-sunk);
-  border-left: 3px solid var(--primary);
-  border-radius: 0 var(--radius) var(--radius) 0;
+  border-radius: var(--radius);
+  color: var(--ink-muted);
   font-size: 16px;
+  font-style: italic;
+}
+
+.quote::before {
+  content: '\201C';
+}
+
+.quote::after {
+  content: '\201D';
 }
 
 .reason {
@@ -1046,14 +1143,26 @@ p {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  /* brand, two links and the sample data flag have to share 390px */
+  /* three links, reset and log out don't fit beside the brand in 390px, so the nav gets its own
+     row under it. wrapping, not sideways scrolling, so every link stays visible */
   .topbar__inner {
-    padding: 0 12px;
-    gap: 8px;
+    padding: 8px 12px;
+    gap: 4px 8px;
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
   }
 
   .topbar__nav {
     gap: 0;
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+
+  .mock-flag {
+    margin-left: auto;
   }
 
   .topbar__link {
@@ -1066,6 +1175,26 @@ p {
     white-space: nowrap;
     padding: 3px 6px;
     font-size: 11px;
+  }
+
+  .topbar__reset-long {
+    display: none;
+  }
+
+  .topbar__reset-short {
+    display: inline;
+  }
+
+  .reset-strip__inner {
+    padding: 10px 12px;
+  }
+
+  .reset-strip__actions {
+    width: 100%;
+  }
+
+  .reset-strip__actions > button {
+    flex: 1;
   }
 
   .page {
