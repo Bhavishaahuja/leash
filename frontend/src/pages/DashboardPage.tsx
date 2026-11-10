@@ -4,6 +4,7 @@ import {
   ExternalFilterModule,
   ModuleRegistry,
   QuickFilterModule,
+  RowApiModule,
   RowSelectionModule,
   RowStyleModule,
   ValidationModule,
@@ -16,7 +17,7 @@ import {
 } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { getStats, listOrders } from '../api'
+import { DEMO_RESET_EVENT, getStats, listOrders } from '../api'
 import { OrderPanel } from '../components/OrderPanel'
 import { StatsTiles } from '../components/StatsTiles'
 import {
@@ -39,6 +40,8 @@ const gridModules = [
   ClientSideRowModelModule,
   QuickFilterModule,
   ExternalFilterModule,
+  // forEachNode and redrawRows, for the flash on rows that just changed
+  RowApiModule,
   RowSelectionModule,
   RowStyleModule,
   CellStyleModule,
@@ -122,8 +125,8 @@ const FLASH_MS = 2400
 
 // Merchant view: every agent order, what the check said, and what the human did about it.
 export function DashboardPage() {
-  const { state: orders, stale } = usePolling(loadOrders, POLL_MS)
-  const { state: stats } = usePolling(loadStats, POLL_MS)
+  const { state: orders, stale, refresh: refreshOrders } = usePolling(loadOrders, POLL_MS)
+  const { state: stats, refresh: refreshStats } = usePolling(loadStats, POLL_MS)
   const gridRef = useRef<AgGridReact<Order>>(null)
   // each row's status as of the last poll, so we can tell which rows just changed.
   // null until the first load, which shouldn't flash anything
@@ -242,6 +245,16 @@ export function DashboardPage() {
       setSelectedId(event.data.id)
     }
   }, [])
+
+  useEffect(() => {
+    // after a reset from the top bar, don't make the merchant wait for the next poll
+    function handleReset() {
+      refreshOrders()
+      refreshStats()
+    }
+    window.addEventListener(DEMO_RESET_EVENT, handleReset)
+    return () => window.removeEventListener(DEMO_RESET_EVENT, handleReset)
+  }, [refreshOrders, refreshStats])
 
   useEffect(() => {
     const timers = flashTimers.current

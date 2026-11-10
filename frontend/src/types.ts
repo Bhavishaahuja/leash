@@ -287,3 +287,13 @@ export interface Stats {
   // the last 10 human decisions, newest first. null on old rows with no timing
   recent_decision_ms: (number | null)[]
 }
+
+// POST /demo/reset: what the reset did. it wipes seeded rows, it doesn't seed again
+export interface ResetSummary {
+  voided_holds: number
+  voided_order_ids: number[]
+  deleted_orders: number
+  deleted_mandates: number
+  // forgotten in Leash only, a dispute stays open at PayPal
+  deleted_disputes: number
+}

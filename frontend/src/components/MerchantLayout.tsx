@@ -3,6 +3,8 @@ import { NavLink, Outlet } from 'react-router'
 import { SESSION_EXPIRED_EVENT, USE_MOCKS, hasSession, logOut } from '../api'
 import { LeashMark } from './LeashMark'
 import { LoginForm } from './LoginForm'
+import { useResetDemo } from '../lib/useResetDemo'
+import { ResetButton, ResetStrip } from './ResetDemo'
 
 type SessionState = 'in' | 'out' | 'expired'
 
@@ -13,6 +15,7 @@ type SessionState = 'in' | 'out' | 'expired'
 // mode hasSession() is always true, so a fresh clone still works with no setup.
 export function MerchantLayout() {
   const [session, setSession] = useState<SessionState>(() => (hasSession() ? 'in' : 'out'))
+  const reset = useResetDemo()
 
   useEffect(() => {
     // api.ts fires this on any 401 from a merchant route, from whichever page made the call
@@ -51,6 +54,7 @@ export function MerchantLayout() {
                 <NavLink to="/disputes" className="topbar__link">
                   Disputes
                 </NavLink>
+                <ResetButton controls={reset} />
               </>
             )}
             {loggedIn && !USE_MOCKS && (
@@ -61,6 +65,7 @@ export function MerchantLayout() {
           </nav>
           {USE_MOCKS && <span className="mock-flag">Sample data</span>}
         </div>
+        {loggedIn && <ResetStrip controls={reset} />}
       </header>
       <main className="page">
         {loggedIn ? (

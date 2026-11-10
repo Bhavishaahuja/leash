@@ -2,6 +2,7 @@
 // before the backend is live: set VITE_USE_MOCKS=false in .env.local to hit the real API.
 
 import { scenarioBlocker } from './lib/demoScenarios'
+import { SEED_LABEL_PREFIX } from './lib/format'
 import { mockMandates, mockOrders, mockPlacedOrder } from './mocks'
 import type {
   ApprovalAction,
@@ -15,6 +16,7 @@ import type {
   OrderDetail,
   PlacedOrder,
   ReviewLink,
+  ResetSummary,
   ReviewView,
   Stats,
 } from './types'
@@ -448,6 +450,42 @@ export async function getStats(): Promise<Stats> {
     return mockDelay(mockStats())
   }
   return request<Stats>('/stats')
+}
+
+// fired on window after a demo reset, so the dashboard refetches right away instead of on the next poll
+export const DEMO_RESET_EVENT = 'leash:demo-reset'
+
+// same rule as the backend: only seeded rows (buyer_label starts with seed-demo:) are touched
+function resetMockDemo(): ResetSummary {
+  const voidedIds: number[] = []
+  const deletedMandates = new Set<number>()
+  let deletedOrders = 0
+  for (let index = mockStore.length - 1; index >= 0; index -= 1) {
+    const order = mockStore[index]
+    if (!order.mandate.buyer_label.startsWith(SEED_LABEL_PREFIX)) {
+      continue
+    }
+    if (order.status === 'authorized') {
+      voidedIds.push(order.id)
+    }
+    deletedMandates.add(order.mandate_id)
+    deletedOrders += 1
+    mockStore.splice(index, 1)
+  }
+  return {
+    voided_holds: voidedIds.length,
+    voided_order_ids: voidedIds,
+    deleted_orders: deletedOrders,
+    deleted_mandates: deletedMandates.size,
+    deleted_disputes: 0,
+  }
+}
+
+// voids open seeded holds at PayPal, then deletes the seeded rows. 429 if run more than 3 times a minute
+export async function resetDemo(): Promise<ResetSummary> {
+  const summary = USE_MOCKS ? await mockDelay(resetMockDemo()) : await request<ResetSummary>('/demo/reset', { method: 'POST' })
+  window.dispatchEvent(new Event(DEMO_RESET_EVENT))
+  return summary
 }
 
 export async function getOrder(orderId: number): Promise<OrderDetail> {
