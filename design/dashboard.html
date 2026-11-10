@@ -1,0 +1,611 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Leash merchant dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;family=Newsreader:ital,opsz,wght@1,6..72,400;1,6..72,500&amp;display=swap">
+<style>
+body{margin:0;background:#F5F6F4}
+a{color:#0F1215}a:hover{color:#0B63CE}
+.m{font-family:'IBM Plex Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.v{font-family:'Newsreader',Georgia,serif;font-style:italic}
+.lab{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:11.5px;font-weight:500;letter-spacing:.07em;text-transform:uppercase;color:#4D5560}
+.del{color:#5E6670;text-decoration:none;background:linear-gradient(#C2410C,#C2410C) no-repeat 0 58%/100% 2px;animation:strike .24s cubic-bezier(.2,0,0,1) .05s}
+@keyframes strike{from{background-size:0% 2px}to{background-size:100% 2px}}
+.ins{text-decoration:none;background:#FFE58A;color:#0F1215;font-family:'Schibsted Grotesk',system-ui,sans-serif;font-style:normal;font-weight:600;padding:0 5px}
+.btn{transition:background-color .14s cubic-bezier(.2,0,0,1),color .14s cubic-bezier(.2,0,0,1)}
+.btn-ink:hover{background:#2A3038 !important}
+.btn-line:hover{background:#F0F2F4 !important}
+.btn:focus-visible,.navl:focus-visible,.lnk:focus-visible{outline:2px solid #0B63CE;outline-offset:2px}
+.navl{transition:color .14s cubic-bezier(.2,0,0,1)}
+.navl:hover{color:#0F1215 !important}
+.trunc{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.qz{width:100%;border-collapse:collapse;table-layout:fixed}
+.qz th{font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:500;font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:#4D5560;text-align:left;padding:0 12px;height:40px;border-bottom:1px solid #0F1215;white-space:nowrap;background:#FFFFFF}
+.qz td{padding:0 12px;height:50px;border-bottom:1px solid #E3E6E9;font-size:14px;color:#0F1215;vertical-align:middle}
+.qz tbody tr.row{cursor:pointer;transition:background-color .3s cubic-bezier(.2,0,0,1)}
+.qz tbody tr.row:hover td{box-shadow:inset 0 1px 0 #C9CFD5,inset 0 -1px 0 #C9CFD5}
+.slidein{animation:slidein 1.2s cubic-bezier(.2,0,0,1) .05s}
+@keyframes slidein{from{background-color:#FFE58A}}
+.live{animation:live 2s ease-in-out infinite}
+@keyframes live{0%,100%{opacity:1}50%{opacity:.35}}
+.hold{touch-action:none;user-select:none;-webkit-user-select:none}
+.pop{animation:pop .2s cubic-bezier(.2,0,0,1) .05s}
+@keyframes pop{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.del,.slidein,.pop,.live{animation:none}.btn,.navl,.qz tbody tr.row{transition:none}}
+</style>
+</helmet>
+<div style="min-height: 1900px; background: #F5F6F4; font-family: 'Schibsted Grotesk', system-ui, sans-serif; color: #0F1215">
+
+<header style="background: #FFFFFF; border-bottom: 1px solid #D8DDE2">
+  <div style="max-width: 1440px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 32px); box-sizing: border-box; min-height: 60px; display: flex; align-items: stretch; justify-content: space-between; flex-wrap: wrap; column-gap: 24px">
+    <div style="display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 10px 0">
+      <div style="display: flex; align-items: center; gap: 8px">
+        <svg width="26" height="26" viewBox="0 0 160 160" fill="none" stroke="#0F1215" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Leash"><circle cx="80" cy="80" r="62" stroke-width="13"></circle><path d="M50 86 L70 106 L101 70 C108 62 108 50 99 49 C93 48.5 90 53 91 57"></path></svg>
+        <span style="font-weight: 800; font-size: 20px; letter-spacing: -0.03em">leash</span>
+      </div>
+      <span aria-hidden="true" style="width: 1px; height: 22px; background: #D8DDE2"></span>
+      <span style="font-weight: 600; font-size: 15px">Fernwood Supply Co</span>
+      <span class="lab" style="border: 1px solid #D8DDE2; border-radius: 999px; padding: 3px 10px">Sandbox</span>
+    </div>
+    <nav aria-label="Main" style="display: flex; align-items: stretch; gap: 20px; flex-wrap: wrap">
+      <a href="#orders" aria-current="page" class="navl" style="text-decoration: none; font-weight: 600; font-size: 15px; display: flex; align-items: center; box-shadow: inset 0 -2px 0 #0F1215">Orders</a>
+      <a href="#disputes" class="navl" style="text-decoration: none; font-weight: 500; font-size: 15px; color: #4D5560; display: flex; align-items: center; gap: 8px">Disputes<span class="m" style="font-size: 12px; font-weight: 600; color: #4A3290; border: 1px solid #5B3FA6; border-radius: 999px; padding: 0 7px; line-height: 18px">1</span></a>
+      <span style="display: flex; align-items: center; gap: 10px; padding: 8px 0">
+        <button type="button" class="btn btn-line" onClick="{{resetDemo}}" style="height: 36px; padding: 0 12px; border: 1px solid #0F1215; border-radius: 4px; background: #FFFFFF; color: #0F1215; font: 600 13.5px 'Schibsted Grotesk', system-ui, sans-serif; cursor: pointer; display: flex; align-items: center; gap: 8px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0F1215" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><path d="M3 4v5h5"></path></svg>Reset demo</button>
+        <span role="img" aria-label="Signed in as demo merchant" style="width: 32px; height: 32px; border-radius: 4px; background: #0F1215; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 12.5px; font-weight: 700">FS</span>
+      </span>
+    </nav>
+  </div>
+</header>
+
+<sc-if value="{{justReset}}" hint-placeholder-val="{{false}}">
+  <div role="status" class="pop" style="background: #0F1215; color: #FFFFFF; font-size: 14px; padding: 10px clamp(16px, 4vw, 32px); text-align: center">Demo reset. Seeded orders are back, decisions cleared.</div>
+</sc-if>
+
+<main style="max-width: 1440px; margin: 0 auto; padding: 32px clamp(16px, 4vw, 32px) 64px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px">
+
+  <section aria-labelledby="hero-h" style="display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 24px">
+    <div style="display: flex; flex-direction: column; gap: 10px; flex: 1 1 380px">
+      <span class="lab">Held, authorized but not charged</span>
+      <h1 id="hero-h" style="margin: 0; font-size: 52px; line-height: 1; font-weight: 800; letter-spacing: -0.035em">{{heroTitle}}</h1>
+      <p style="margin: 0; font-size: 16px; line-height: 1.5; color: #4D5560; max-width: 540px">Any agent's order lands here. Clean matches charge on their own. The rest wait for a person, with a fix when the catalog has one.</p>
+    </div>
+    <dl aria-label="Today" style="margin: 0; flex: 0 1 780px; display: flex; flex-wrap: wrap; gap: 1px; background: #D8DDE2; border: 1px solid #D8DDE2">
+      <div style="flex: 1 1 92px; padding: 12px 14px; background: #FFFFFF; display: flex; flex-direction: column; gap: 4px"><dt class="lab">Orders today</dt><dd class="m" style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em">48</dd></div>
+      <div style="flex: 1 1 92px; padding: 12px 14px; background: #FFFFFF; display: flex; flex-direction: column; gap: 4px"><dt class="lab">Charged on their own</dt><dd class="m" style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: #17603B">39</dd></div>
+      <div style="flex: 1 1 92px; padding: 12px 14px; background: #FFF6DE; display: flex; flex-direction: column; gap: 4px"><dt class="lab" style="color: #7A4F00">Held now</dt><dd class="m" style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: #7A4F00">{{heldNow}}</dd></div>
+      <div style="flex: 1 1 92px; padding: 12px 14px; background: #FFFFFF; display: flex; flex-direction: column; gap: 4px"><dt class="lab">Fixed</dt><dd class="m" style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: #0A55B0">{{fixedCount}}</dd></div>
+      <div style="flex: 1 1 92px; padding: 12px 14px; background: #FFFFFF; display: flex; flex-direction: column; gap: 4px"><dt class="lab">Median decision</dt><dd class="m" style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em">6.4s</dd></div>
+      <div style="flex: 1 1 92px; padding: 12px 14px; background: #FFFFFF; display: flex; flex-direction: column; gap: 4px"><dt class="lab">Disputes won</dt><dd class="m" style="margin: 0; font-size: 26px; font-weight: 600; letter-spacing: -0.02em; color: #4A3290">1</dd></div>
+    </dl>
+  </section>
+
+  <section aria-label="Rubber-stamp watch" style="background: #D8DDE2; border: 1px solid #D8DDE2; display: flex; flex-wrap: wrap; align-items: stretch; gap: 1px">
+    <div style="flex: 999 1 380px; background: #FFFFFF; padding: 14px 20px; display: flex; flex-direction: column; gap: 6px; justify-content: center">
+      <span class="lab" style="color: #A8380A; display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 7px; height: 7px; background: #C2410C"></span>Rubber-stamp watch is on</span>
+      <span style="font-size: 15px; line-height: 1.45">Your last 3 approvals came in under 2 seconds each. While this is on, only risk 60 and up escalates, the reasons get sharper, and unsure checks always come to you.</span>
+    </div>
+    <div role="img" aria-label="Last three approval times: 1.4, 1.1 and 1.2 seconds, all under the 2 second line" style="flex: 1 0 auto; background: #FFFFFF; padding: 12px 24px 10px; display: flex; flex-direction: column; gap: 4px; justify-content: center">
+      <div style="position: relative; height: 46px; display: flex; align-items: flex-end; gap: 8px; padding-right: 26px; border-bottom: 1px solid #0F1215">
+        <span style="position: absolute; left: 0; right: 22px; top: 4px; border-top: 1px dashed #C2410C"></span>
+        <span class="m" style="position: absolute; right: 0; top: -4px; font-size: 11px; color: #A8380A">2s</span>
+        <span style="width: 16px; height: 30px; background: #C2410C"></span>
+        <span style="width: 16px; height: 24px; background: #C2410C"></span>
+        <span style="width: 16px; height: 26px; background: #C2410C"></span>
+      </div>
+      <div class="m" style="display: flex; gap: 8px; font-size: 11px; color: #4D5560; padding-right: 26px"><span style="width: 16px; text-align: center">1.4</span><span style="width: 16px; text-align: center">1.1</span><span style="width: 16px; text-align: center">1.2</span></div>
+    </div>
+  </section>
+
+  <section id="orders" aria-labelledby="grid-h" style="display: flex; flex-direction: column; gap: 12px">
+    <div style="display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px">
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <span class="lab" style="display: flex; align-items: center; gap: 8px"><span class="live" aria-hidden="true" style="width: 7px; height: 7px; border-radius: 50%; background: #1F7A4C"></span>Live, updated every 3s</span>
+        <h2 id="grid-h" style="margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.025em">Orders</h2>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+        <div role="group" aria-label="Filter orders" style="display: flex; flex-wrap: wrap; gap: 1px; background: #0F1215; border: 1px solid #0F1215; border-radius: 4px; overflow: hidden">
+          <sc-for list="{{filters}}" as="f" hint-placeholder-count="6">
+            <button type="button" class="btn" onClick="{{f.pick}}" aria-pressed="{{f.pressed}}" style="{{f.style}}">{{f.label}}<span class="m" style="{{f.countStyle}}">{{f.count}}</span></button>
+          </sc-for>
+        </div>
+        <button type="button" class="btn" onClick="{{toggleGroup}}" aria-pressed="{{groupPressed}}" style="{{groupBtnStyle}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M8 12h12M8 18h12M4 12v6"></path></svg>Group by agent</button>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+      <div style="flex: 999 1 820px; min-width: 0; background: #FFFFFF; border: 1px solid #D8DDE2">
+        <div style="overflow-x: auto">
+          <table class="qz" style="min-width: 1000px">
+            <colgroup><col style="width: 108px"><col style="width: 164px"><col style="width: 84px"><col style="width: 176px"><col style="width: 76px"><col><col style="width: 150px"><col style="width: 112px"></colgroup>
+            <thead><tr><th scope="col">Order</th><th scope="col">Item</th><th scope="col" style="text-align: right">Amount</th><th scope="col">Status</th><th scope="col">Risk</th><th scope="col">What changed</th><th scope="col">Suggested fix</th><th scope="col">Decision</th></tr></thead>
+            <tbody>
+              <sc-for list="{{lines}}" as="r" hint-placeholder-count="12">
+                <sc-if value="{{r.isGroup}}" hint-placeholder-val="{{false}}">
+                  <tr style="background: #F5F6F4">
+                    <td colspan="8" style="height: 52px; border-bottom: 1px solid #C9CFD5">
+                      <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
+                        <button type="button" onClick="{{r.toggle}}" aria-expanded="{{r.expanded}}" class="btn" style="height: 44px; border: none; background: transparent; padding: 0; display: flex; align-items: center; gap: 10px; font: 700 15px 'Schibsted Grotesk', system-ui, sans-serif; color: #0F1215; cursor: pointer">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0F1215" stroke-width="2.8" stroke-linecap="square" aria-hidden="true" style="{{r.chevStyle}}"><path d="M9 6l6 6-6 6"></path></svg>
+                          {{r.name}}
+                        </button>
+                        <span class="m" style="font-size: 12px; color: #4D5560">{{r.key}}</span>
+                        <span style="font-size: 13.5px; color: #4D5560"><span class="m" style="color: #0F1215">{{r.total}}</span> orders today</span>
+                        <span style="display: flex; align-items: center; gap: 8px; font-size: 13.5px">
+                          <span aria-hidden="true" style="width: 80px; height: 6px; background: #E3E6E9; display: block"><span style="{{r.trustFill}}"></span></span>
+                          <span><span class="m" style="font-weight: 600">{{r.pct}}%</span> needed a human</span>
+                        </span>
+                        <span style="font-size: 13px; color: #4D5560">{{r.breakdown}}</span>
+                      </div>
+                    </td>
+                  </tr>
+                </sc-if>
+                <sc-if value="{{r.isRow}}" hint-placeholder-val="{{true}}">
+                  <tr class="{{r.rowClass}}" onClick="{{r.select}}" style="{{r.rowStyle}}">
+                    <td><div style="{{r.idCellStyle}}"><button type="button" onClick="{{r.select}}" aria-pressed="{{r.pressed}}" class="m lnk" style="{{r.idStyle}}">{{r.id}}</button><sc-if value="{{r.showAgent}}" hint-placeholder-val="{{false}}"><span style="font-size: 12px; color: #4D5560">{{r.agentName}}</span></sc-if></div></td>
+                    <td class="trunc" title="{{r.item}}" style="{{r.textStyle}}">{{r.item}}</td>
+                    <td class="m" style="{{r.amountStyle}}">{{r.amount}}</td>
+                    <td><span style="{{r.chipStyle}}"><span style="{{r.dotStyle}}"></span>{{r.status}}</span></td>
+                    <td><div style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="display: flex; gap: 1px"><sc-for list="{{r.segs}}" as="s" hint-placeholder-count="10"><span style="{{s.style}}"></span></sc-for></span><span class="m" style="font-size: 12.5px">{{r.risk}}</span></div></td>
+                    <td class="trunc" style="font-size: 14px">
+                      <sc-if value="{{r.isMatch}}" hint-placeholder-val="{{false}}"><span style="color: #4D5560">Nothing, matches mandate</span></sc-if>
+                      <sc-if value="{{r.hasDiff}}" hint-placeholder-val="{{true}}"><span class="v" style="font-size: 16px"><sc-for list="{{r.short}}" as="p" hint-placeholder-count="3"><sc-if value="{{p.same}}" hint-placeholder-val="{{true}}"><span>{{p.text}}</span></sc-if><sc-if value="{{p.del}}" hint-placeholder-val="{{false}}"><del class="del">{{p.text}}</del></sc-if><sc-if value="{{p.ins}}" hint-placeholder-val="{{false}}"><ins class="ins" style="font-size: 13.5px">{{p.text}}</ins></sc-if></sc-for></span></sc-if>
+                    </td>
+                    <td class="trunc" title="{{r.fixTitle}}" style="{{r.fixStyle}}">{{r.fixCell}}</td>
+                    <td><div style="display: flex; flex-direction: column; gap: 1px; line-height: 1.25"><span style="{{r.decisionStyle}}">{{r.decision}}</span><span class="m" style="{{r.timeStyle}}">{{r.time}}</span></div></td>
+                  </tr>
+                </sc-if>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <sc-if value="{{noRows}}" hint-placeholder-val="{{false}}">
+          <p style="margin: 0; padding: 32px; text-align: center; font-size: 14px; color: #4D5560">No orders in this view.</p>
+        </sc-if>
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; padding: 12px 14px; border-top: 1px solid #D8DDE2; font-size: 13px; color: #4D5560">
+          <span style="display: flex; flex-wrap: wrap; gap: 8px 20px"><span><span class="m" style="color: #A8380A; font-weight: 600">1.1s</span> in orange: a person approved in under 2 seconds</span><span>Fixes come from the catalog, never from Claude</span></span>
+          <span class="m">Rows 1 to {{shownCount}} of 48, page 1 of 4</span>
+        </div>
+      </div>
+
+      <aside aria-label="Selected order" style="flex: 1 1 340px; max-width: 360px; min-width: min(320px, 100%); background: #FFFFFF; border: 1px solid #D8DDE2; box-sizing: border-box; display: flex; flex-direction: column">
+        <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #D8DDE2">
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px">
+            <span class="lab" style="color: #0F1215">{{sel.id}}</span>
+            <span style="{{sel.chipStyle}}"><span style="{{sel.dotStyle}}"></span>{{sel.status}}</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px">
+            <h3 style="margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.015em">{{sel.item}}</h3>
+            <span class="m" style="font-size: 19px; font-weight: 500">{{sel.amount}}</span>
+          </div>
+          <span style="font-size: 13.5px; color: #4D5560">Ordered by <span style="color: #0F1215; font-weight: 600">{{sel.agentName}}</span> <span class="m" style="font-size: 12px">({{sel.agentKey}})</span></span>
+          <sc-if value="{{sel.hasReplacedBy}}" hint-placeholder-val="{{false}}">
+            <button type="button" onClick="{{sel.goReplacedBy}}" class="lnk" style="align-self: flex-start; min-height: 32px; border: none; background: transparent; padding: 0; font: 500 14px 'Schibsted Grotesk', system-ui, sans-serif; color: #0A55B0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px">Replaced by {{sel.replacedBy}}, the fixed order</button>
+          </sc-if>
+          <sc-if value="{{sel.hasReplaces}}" hint-placeholder-val="{{false}}">
+            <button type="button" onClick="{{sel.goReplaces}}" class="lnk" style="align-self: flex-start; min-height: 32px; border: none; background: transparent; padding: 0; font: 500 14px 'Schibsted Grotesk', system-ui, sans-serif; color: #0A55B0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px">Replaces {{sel.replaces}}, voided when the fix was accepted</button>
+          </sc-if>
+        </div>
+
+        <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #D8DDE2">
+          <span class="lab">What the buyer asked for</span>
+          <p class="v" style="margin: 0; font-size: 20px; line-height: 1.4"><span>“</span><sc-for list="{{sel.parts}}" as="p" hint-placeholder-count="5"><sc-if value="{{p.same}}" hint-placeholder-val="{{true}}"><span>{{p.text}}</span></sc-if><sc-if value="{{p.del}}" hint-placeholder-val="{{false}}"><del class="del">{{p.text}}</del></sc-if><sc-if value="{{p.ins}}" hint-placeholder-val="{{false}}"><ins class="ins">{{p.text}}</ins></sc-if></sc-for><span>”</span></p>
+          <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap">
+            <span class="lab">Claude's check</span>
+            <span style="{{sel.checkStyle}}">{{sel.check}}</span>
+            <span class="m" style="font-size: 12.5px; color: #4D5560">risk {{sel.risk}}</span>
+          </div>
+          <span style="font-size: 14.5px; line-height: 1.45">{{sel.reason}}</span>
+          <sc-if value="{{sel.isUnsure}}" hint-placeholder-val="{{false}}">
+            <span style="font-size: 13.5px; line-height: 1.45; color: #7A4F00; background: #FFF6DE; border: 1px dashed #B98100; padding: 8px 10px">Unsure always goes to a person, even in sharp mode, whatever the risk score.</span>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{sel.hasFix}}" hint-placeholder-val="{{false}}">
+          <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid #D8DDE2; background: #F2F7FD">
+            <span class="lab" style="color: #0A55B0">Suggested fix, from the catalog</span>
+            <span style="font-size: 15.5px; font-weight: 600; line-height: 1.4">{{sel.fix}}</span>
+            <span style="font-size: 13px; color: #4D5560">Accepting voids this authorization and places a new order for the right item. The new order goes through the check again.</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{sel.noFix}}" hint-placeholder-val="{{false}}">
+          <div style="padding: 12px 20px; border-bottom: 1px solid #D8DDE2; font-size: 13.5px; color: #4D5560">No in-stock item matches every field of the mandate, so there's no fix to offer.</div>
+        </sc-if>
+
+        <sc-if value="{{sel.pending}}" hint-placeholder-val="{{true}}">
+          <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #D8DDE2">
+            <sc-if value="{{sel.sharpNote}}" hint-placeholder-val="{{false}}">
+              <span style="font-size: 13.5px; line-height: 1.4; color: #8A2E08; background: #FDF0E9; border: 1px solid #F3C9B2; padding: 8px 10px">Sharp mode: look closely, the size is 8.5, not 8. Approving as is takes a press and hold.</span>
+            </sc-if>
+            <sc-if value="{{sel.hasFix}}" hint-placeholder-val="{{false}}">
+              <button type="button" class="btn btn-ink" onClick="{{sel.acceptFix}}" style="height: 48px; border: none; border-radius: 4px; background: #0F1215; color: #FFFFFF; font: 700 15px 'Schibsted Grotesk', system-ui, sans-serif; cursor: pointer">Accept fix: {{sel.fixShort}}</button>
+            </sc-if>
+            <div style="display: flex; gap: 8px">
+              <sc-if value="{{sel.isSharp}}" hint-placeholder-val="{{false}}">
+                <button type="button" class="hold btn btn-line" aria-label="{{sel.holdAria}}" onPointerDown="{{sel.holdStart}}" onPointerUp="{{sel.holdStop}}" onPointerLeave="{{sel.holdStop}}" onPointerCancel="{{sel.holdStop}}" onKeyDown="{{sel.holdKeyDown}}" onKeyUp="{{sel.holdKeyUp}}" style="flex: 1; height: 48px; border: 1px solid #0F1215; border-radius: 4px; background: #FFFFFF; color: #0F1215; font: 600 14.5px 'Schibsted Grotesk', system-ui, sans-serif; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; padding: 0 12px">
+                  <svg width="20" height="20" viewBox="0 0 28 28" aria-hidden="true" style="transform: rotate(-90deg); flex: none"><circle cx="14" cy="14" r="11" fill="none" stroke="#0F1215" stroke-opacity="0.2" stroke-width="3"></circle><circle cx="14" cy="14" r="11" fill="none" stroke="#C2410C" stroke-width="3" stroke-dasharray="69.12" stroke-dashoffset="{{sel.ringOffset}}"></circle></svg>
+                  <span>{{sel.holdLabel}}</span>
+                </button>
+              </sc-if>
+              <sc-if value="{{sel.notSharp}}" hint-placeholder-val="{{true}}">
+                <button type="button" class="btn btn-line" onClick="{{sel.approve}}" style="{{sel.approveStyle}}">{{sel.approveLabel}}</button>
+              </sc-if>
+              <button type="button" class="btn btn-line" onClick="{{sel.reject}}" style="height: 48px; padding: 0 18px; border: 1px solid #0F1215; border-radius: 4px; background: #FFFFFF; color: #0F1215; font: 600 14.5px 'Schibsted Grotesk', system-ui, sans-serif; cursor: pointer">Reject</button>
+            </div>
+            <span style="font-size: 12.5px; color: #4D5560">These open the order's single-use review link, so the server times the decision.</span>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{sel.decidedNow}}" hint-placeholder-val="{{false}}">
+          <div class="pop" style="padding: 14px 20px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid #D8DDE2">
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+              <span style="font-size: 15px; font-weight: 700">{{sel.receiptTitle}}</span>
+              <span style="font-size: 13px; color: #4D5560">Decided in <span class="m" style="color: #0F1215">{{sel.took}}</span>, charged <span class="m" style="color: #0F1215">{{sel.charged}}</span></span>
+            </div>
+            <button type="button" class="btn btn-line" onClick="{{sel.undo}}" style="height: 44px; padding: 0 14px; border: 1px solid #D8DDE2; border-radius: 4px; background: #FFFFFF; color: #0F1215; font: 500 14px 'Schibsted Grotesk', system-ui, sans-serif; cursor: pointer">Undo</button>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{sel.hasEvidence}}" hint-placeholder-val="{{false}}">
+          <div style="padding: 16px 20px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid #D8DDE2">
+            <span class="lab" style="color: #4A3290">Evidence pack, filed with PayPal</span>
+            <div style="display: flex; align-items: center; gap: 12px; border: 1px solid #D8DDE2; padding: 10px 12px; flex-wrap: wrap">
+              <svg width="28" height="32" viewBox="0 0 28 32" fill="none" stroke="#0F1215" stroke-width="1.6" aria-hidden="true" style="flex: none"><path d="M3 1h15l7 7v23H3z"></path><path d="M18 1v7h7"></path><path d="M8 16h12M8 20h12M8 24h8"></path></svg>
+              <div style="flex: 1 1 140px; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+                <span class="m trunc" style="font-size: 13px; font-weight: 600">LS-80405-evidence.pdf</span>
+                <span style="font-size: 12.5px; color: #4D5560">4 pages, 212 KB, dispute PP-D-24187</span>
+              </div>
+              <a href="#evidence-LS-80405.pdf" class="btn btn-line" style="height: 44px; padding: 0 14px; border: 1px solid #0F1215; border-radius: 4px; display: flex; align-items: center; gap: 8px; text-decoration: none; font-weight: 600; font-size: 14px; flex: none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0F1215" stroke-width="2.4" stroke-linecap="square" aria-hidden="true"><path d="M12 4v12M6 10l6 6 6-6M4 20h16"></path></svg>Download PDF</a>
+            </div>
+            <ol class="m" style="margin: 0; padding-left: 18px; font-size: 12.5px; line-height: 1.7; color: #4D5560">
+              <li>Mandate, as the buyer wrote it</li>
+              <li>Claude's check and the one changed field</li>
+              <li>Approval record: review link, 8.7s, 09:12:15</li>
+              <li>Capture receipt and agent identity</li>
+            </ol>
+          </div>
+        </sc-if>
+
+        <div style="padding: 16px 20px 6px; display: flex; flex-direction: column; gap: 12px">
+          <h4 class="lab" style="margin: 0">Timeline</h4>
+          <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+            <sc-for list="{{sel.steps}}" as="s" hint-placeholder-count="6">
+              <li style="display: grid; grid-template-columns: 64px 14px minmax(0, 1fr); column-gap: 12px">
+                <span class="m" style="font-size: 12.5px; color: #4D5560; padding-top: 1px">{{s.time}}</span>
+                <div style="display: flex; flex-direction: column; align-items: center">
+                  <span style="{{s.node}}"></span>
+                  <sc-if value="{{s.notLast}}" hint-placeholder-val="{{true}}"><span style="flex: 1; width: 1px; background: #C9CFD5; min-height: 14px"></span></sc-if>
+                </div>
+                <div style="padding: 0 0 14px; display: flex; flex-direction: column; gap: 2px">
+                  <span style="{{s.labelStyle}}">{{s.label}}</span>
+                  <span style="font-size: 13.5px; color: #4D5560">{{s.note}}</span>
+                </div>
+              </li>
+            </sc-for>
+          </ol>
+        </div>
+      </aside>
+    </div>
+  </section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"holdMs":{"editor":"int","default":1500,"min":600,"max":4000,"step":100,"unit":"ms"},"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = this.initialState();
+    this.timer = null;
+    this.mountT = Date.now();
+  }
+  initialState() {
+    return { filter: 'all', grouped: true, selected: 'LS-80414', decided: {}, progress: 0, holding: false, collapsed: {}, justReset: false };
+  }
+  componentWillUnmount() {
+    if (this.timer) clearInterval(this.timer);
+  }
+  decide(id, kind) {
+    var d = Object.assign({}, this.state.decided);
+    d[id] = { kind: kind, took: ((Date.now() - this.mountT) / 1000).toFixed(1) + 's' };
+    this.setState({ decided: d, justReset: false });
+  }
+  undo(id) {
+    var d = Object.assign({}, this.state.decided);
+    delete d[id];
+    this.setState({ decided: d, progress: 0, holding: false, selected: id });
+  }
+  holdBegin(id) {
+    if (this.timer || this.state.decided[id]) return;
+    var self = this;
+    var total = this.props.holdMs ?? 1500;
+    var t0 = Date.now();
+    this.setState({ holding: true });
+    this.timer = setInterval(function () {
+      var p = Math.min(1, (Date.now() - t0) / total);
+      if (p >= 1) {
+        clearInterval(self.timer);
+        self.timer = null;
+        self.setState({ progress: 0, holding: false });
+        self.decide(id, 'approved');
+      } else {
+        self.setState({ progress: p });
+      }
+    }, 16);
+  }
+  holdEnd() {
+    if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    if (this.state.holding || this.state.progress) this.setState({ progress: 0, holding: false });
+  }
+  parts(list) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var it = list[i];
+      if (typeof it === 'string') out.push({ text: it, same: true, del: false, ins: false });
+      else out.push({ text: it[0], same: false, del: it[1] === 'd', ins: it[1] === 'i' });
+    }
+    return out;
+  }
+  // risk as ten ledger ticks, filled ones take the band color
+  segs(risk) {
+    var color = risk >= 70 ? '#B42318' : (risk >= 40 ? '#B98100' : '#1F7A4C');
+    var filled = Math.round(risk / 10);
+    var out = [];
+    for (var i = 0; i < 10; i++) {
+      out.push({ style: 'display:block;width:3px;height:10px;background:' + (i < filled ? color : '#E3E6E9') });
+    }
+    return out;
+  }
+  seed() {
+    // seeded demo orders, newest first. Five mismatch types plus clean matches, two agents.
+    return [
+      { id: 'LS-80414', agent: 'scout', item: "Trail sneaker, women's 8.5", amount: '$96.00', s: 'held', label: 'Held: wrong size', risk: 64, check: 'Mismatch', sharp: true, isNew: true,
+        full: ["White running sneakers, women's ", ['8', 'd'], ' ', ['8.5', 'i'], ', under $110'], short: ["women's ", ['8', 'd'], ' ', ['8.5', 'i']],
+        reason: 'Agent picked size 8.5, mandate says 8.', fix: 'Size 8 is in stock at the same price, $96.00.', fixShort: 'size 8, $96', fixCell: 'Size 8, same price',
+        fixId: 'LS-80415', fixItem: "Trail sneaker, women's 8", fixAmount: '$96.00', t: ['10:41:02', '10:41:03', '10:41:03'] },
+      { id: 'LS-80413', agent: 'claude', item: 'Kestrel E40 earbuds', amount: '$59.00', s: 'held', label: 'Held: wrong model', risk: 66, check: 'Mismatch',
+        full: ['Kestrel ', ['E50', 'd'], ' ', ['E40', 'i'], ' wireless earbuds, under $60'], short: ['Kestrel ', ['E50', 'd'], ' ', ['E40', 'i']],
+        reason: 'Agent picked the E40. Mandate says E50. Same price, older model.', fix: 'Kestrel E50 is in stock at $59.00.', fixShort: 'E50, $59', fixCell: 'E50, same price',
+        fixId: 'LS-80416', fixItem: 'Kestrel E50 earbuds', fixAmount: '$59.00', t: ['10:38:20', '10:38:21', '10:38:21'] },
+      { id: 'LS-80412', agent: 'scout', item: 'Weekly groceries, 14 items', amount: '$42.30', s: 'unsure', label: 'Unsure', risk: 48, check: 'Unsure',
+        full: ['Weekly groceries, ', ['oat milk', 'd'], ' ', ['almond milk', 'i'], ', no substitutions'], short: [['oat milk', 'd'], ' ', ['almond milk', 'i']],
+        reason: 'Store swapped in almond milk and marked it a similar item. The mandate says no substitutions, but the rest of the basket matches.', fix: null, t: ['10:35:44', '10:35:46', '10:35:46'] },
+      { id: 'LS-80411', agent: 'claude', item: 'Dish soap refill, 2 L', amount: '$12.50', s: 'captured', label: 'Captured', risk: 6, check: 'Match', decision: 'Auto', time: '0.4s', kind: 'auto',
+        full: ['Dish soap refill, 2 L, unscented, under $15'], short: null, reason: 'Every field matched, so Leash charged it.', t: ['10:31:02', '10:31:02', '10:31:03'] },
+      { id: 'LS-80410', agent: 'claude', item: 'Folk Night tickets x2, Fri 20', amount: '$168.00', s: 'captured', label: 'Captured', risk: 4, check: 'Match', decision: 'Fix, re-checked', time: '0.5s', kind: 'refix', replaces: 'LS-80409',
+        full: ['2 tickets, Fernwood Folk Night, Friday Nov 20, under $200'], short: null, reason: 'The fixed order matched every field, so Leash charged it.', t: ['10:24:15', '10:24:15', '10:24:16'] },
+      { id: 'LS-80409', agent: 'claude', item: 'Folk Night tickets x2, Sat 21', amount: '$168.00', s: 'fixed', label: 'Fixed', risk: 78, check: 'Mismatch', decision: 'Fix accepted', time: '5.9s', kind: 'fixed', replacedBy: 'LS-80410',
+        full: ['2 tickets, Fernwood Folk Night, ', ['Friday Nov 20', 'd'], ' ', ['Saturday Nov 21', 'i'], ', under $200'], short: [['Fri 20', 'd'], ' ', ['Sat 21', 'i']],
+        reason: 'Agent booked the wrong night.', fixText: 'Friday seats, same price', t: ['10:23:58', '10:24:00', '10:24:00', '10:24:06', '10:24:06'] },
+      { id: 'LS-80408', agent: 'scout', item: 'Coffee subscription x12', amount: '$216.00', s: 'voided', label: 'Voided', risk: 93, check: 'Rule failed', decision: 'Rejected', time: '9.4s', kind: 'rejected',
+        full: [['1', 'd'], ' ', ['12', 'i'], ' monthly coffee subscription, under $25'], short: ['qty ', ['1', 'd'], ' ', ['12', 'i']],
+        reason: 'Quantity 12, mandate says 1. Also over the $25 cap, a hard rule, so it could never auto-charge.', fixText: 'Qty 1 at $18.00, not taken', t: ['10:11:20', '10:11:20', '10:11:21', '10:11:30', '10:11:30'] },
+      { id: 'LS-80407', agent: 'scout', item: 'Desk lamp, warm white', amount: '$38.00', s: 'captured', label: 'Captured', risk: 31, check: 'Mismatch', decision: 'Approved', time: '1.2s', fast: true, kind: 'approved',
+        full: ['Desk lamp, ', ['cool white', 'd'], ' ', ['warm white', 'i'], ', under $40'], short: [['cool', 'd'], ' ', ['warm', 'i'], ' white'],
+        reason: 'Agent picked warm white. Approved by the buyer in 1.2s.', t: ['10:02:11', '10:02:13', '10:02:13', '10:02:14', '10:02:14'] },
+      { id: 'LS-80406', agent: 'scout', item: 'Paper towels, 6 roll', amount: '$14.00', s: 'captured', label: 'Captured', risk: 5, check: 'Match', decision: 'Auto', time: '0.3s', kind: 'auto',
+        full: ['Paper towels, 6 roll, under $15'], short: null, reason: 'Every field matched, so Leash charged it.', t: ['09:48:12', '09:48:12', '09:48:13'] },
+      { id: 'LS-80404', agent: 'scout', item: 'Phone charger, 30W', amount: '$24.00', s: 'captured', label: 'Captured', risk: 29, check: 'Mismatch', decision: 'Approved', time: '1.1s', fast: true, kind: 'approved',
+        full: ['Phone charger, ', ['20W', 'd'], ' ', ['30W', 'i'], ', under $25'], short: [['20W', 'd'], ' ', ['30W', 'i']],
+        reason: 'Agent picked the 30W model. Approved by the buyer in 1.1s.', t: ['09:30:05', '09:30:07', '09:30:07', '09:30:08', '09:30:08'] },
+      { id: 'LS-80403', agent: 'scout', item: 'Sunscreen, SPF 50', amount: '$16.00', s: 'captured', label: 'Captured', risk: 27, check: 'Mismatch', decision: 'Approved', time: '1.4s', fast: true, kind: 'approved',
+        full: ['Sunscreen, ', ['SPF 30', 'd'], ' ', ['SPF 50', 'i'], ', under $20'], short: [['SPF 30', 'd'], ' ', ['SPF 50', 'i']],
+        reason: 'Agent picked SPF 50. Approved by the buyer in 1.4s.', t: ['09:20:40', '09:20:42', '09:20:42', '09:20:43', '09:20:43'] },
+      { id: 'LS-80405', agent: 'claude', item: 'Canvas tote, black', amount: '$58.00', s: 'disputed', label: 'Disputed: won', risk: 41, check: 'Mismatch', decision: 'Approved', time: '8.7s', kind: 'disputed', evidence: true,
+        full: ['Canvas tote, large, ', ['natural', 'd'], ' ', ['black', 'i'], ', under $60'], short: [['natural', 'd'], ' ', ['black', 'i']],
+        reason: 'Buyer approved black, then disputed the charge. Leash filed the evidence pack and won.', t: ['09:12:04', '09:12:06', '09:12:06', '09:12:15', '09:12:15', '10:05:40', '10:06:02'] }
+    ];
+  }
+  renderVals() {
+    var self = this;
+    var st = this.state;
+    var agents = {
+      scout: { name: 'Scout script', key: 'agent_scout', total: 33, needed: 6, breakdown: '2 held, 1 voided, 3 approved' },
+      claude: { name: 'Claude shopper', key: 'agent_claude', total: 15, needed: 3, breakdown: '1 held, 1 fixed, 1 disputed' }
+    };
+    var tone = {
+      held:     { fg: '#7A4F00', bd: '#B98100', row: '#FFF6DE', dash: false },
+      unsure:   { fg: '#7A4F00', bd: '#B98100', row: '#FFF6DE', dash: true },
+      captured: { fg: '#17603B', bd: '#1F7A4C', row: '', dash: false },
+      voided:   { fg: '#9A1C13', bd: '#B42318', row: '#F3F4F5', dash: false },
+      fixed:    { fg: '#0A55B0', bd: '#0B63CE', row: '#F3F4F5', dash: false },
+      disputed: { fg: '#4A3290', bd: '#5B3FA6', row: '', dash: false }
+    };
+    function chip(t) { return 'display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;padding:2px 9px;border-radius:999px;background:#FFFFFF;border:1px ' + (t.dash ? 'dashed ' : 'solid ') + t.bd + ';color:' + t.fg + ';white-space:nowrap'; }
+    function dot(t) { return 'width:6px;height:6px;border-radius:50%;background:' + t.bd; }
+
+    // apply this session's decisions on top of the seed, like the grid applying polled updates
+    var base = this.seed();
+    var all = [];
+    for (var i = 0; i < base.length; i++) {
+      var r = Object.assign({}, base[i]);
+      var dec = st.decided[r.id];
+      if (dec) {
+        r.isNew = false;
+        if (dec.kind === 'approved') { r.s = 'captured'; r.label = 'Captured'; r.decision = 'Approved'; r.time = dec.took; r.flash = true; }
+        else if (dec.kind === 'rejected') { r.s = 'voided'; r.label = 'Voided'; r.decision = 'Rejected'; r.time = dec.took; }
+        else if (dec.kind === 'fixed') {
+          r.s = 'fixed'; r.label = 'Fixed'; r.decision = 'Fix accepted'; r.time = dec.took; r.replacedBy = r.fixId;
+          all.push({ id: r.fixId, agent: r.agent, item: r.fixItem, amount: r.fixAmount, s: 'captured', label: 'Captured', risk: 5, check: 'Match',
+            decision: 'Fix, re-checked', time: '0.5s', kind: 'refix', replaces: r.id, flash: true, isNew: true,
+            full: [r.fixItem + ', what the buyer asked for'], short: null, reason: 'The fixed order matched every field, so Leash charged it.', t: ['now', 'now', 'now'] });
+        }
+      }
+      all.push(r);
+    }
+
+    var heldNow = 0, fixedCount = 0;
+    var counts = { all: all.length, held: 0, fixed: 0, captured: 0, voided: 0, disputed: 0 };
+    for (var c = 0; c < all.length; c++) {
+      var s = all[c].s;
+      if (s === 'held' || s === 'unsure') { counts.held++; heldNow++; }
+      else counts[s]++;
+      if (s === 'fixed') fixedCount++;
+    }
+
+    function stepsFor(h) {
+      function step(label, time, note, color) {
+        return { label: label, time: time, note: note, node: 'width:9px;height:9px;flex:none;margin-top:5px;background:' + color, labelStyle: 'font-size:15px;font-weight:700;color:' + color };
+      }
+      var ink = '#0F1215';
+      var t = h.t;
+      var out = [step('Authorized', t[0], h.amount + ' held on the buyer’s card', ink)];
+      if (h.kind === 'auto' || h.kind === 'refix') {
+        out.push(step('Checked by Claude', t[1], 'Matched the mandate in ' + h.time, ink));
+        out.push(step('Captured', t[2], h.kind === 'refix' ? 'Charged after the fix was re-checked' : 'Charged automatically', '#17603B'));
+        return out;
+      }
+      out.push(step('Checked by Claude', t[1], h.check === 'Unsure' ? 'Unsure about 1 field' : (h.check === 'Rule failed' ? 'Hard rule failed: over the price cap' : 'Found 1 field that does not match'), ink));
+      out.push(step('Escalated', t[2], 'Review link sent to the buyer’s phone', '#7A4F00'));
+      if (h.s === 'held' || h.s === 'unsure') { out.push(step('Waiting', 'now', 'Nothing charged yet', '#7A4F00')); return out; }
+      if (h.s === 'voided') { out.push(step('Rejected', t[3] || 'now', 'Decided in ' + h.time, '#9A1C13')); out.push(step('Voided', t[4] || 'now', 'Nothing charged', '#9A1C13')); return out; }
+      if (h.s === 'fixed') { out.push(step('Fix accepted', t[3] || 'now', 'Decided in ' + h.time, '#0A55B0')); out.push(step('Voided, replaced', t[4] || 'now', 'New order ' + h.replacedBy + ' placed and re-checked', '#0A55B0')); return out; }
+      out.push(step('Approved', t[3] || 'now', 'Decided in ' + h.time, '#17603B'));
+      out.push(step('Captured', t[4] || 'now', h.amount + ' charged', '#17603B'));
+      if (h.s === 'disputed') {
+        out.push(step('Disputed', t[5], 'Buyer said they did not want black', '#4A3290'));
+        out.push(step('Evidence filed', t[6], 'Evidence pack sent. Dispute won.', '#4A3290'));
+      }
+      return out;
+    }
+
+    var filterOf = { all: null, held: ['held', 'unsure'], fixed: ['fixed'], captured: ['captured'], voided: ['voided'], disputed: ['disputed'] };
+    function inFilter(r) {
+      var want = filterOf[st.filter];
+      if (!want) return true;
+      for (var k = 0; k < want.length; k++) { if (want[k] === r.s) return true; }
+      return false;
+    }
+
+    var sel = null;
+    function makeRow(r, grouped) {
+      var t = tone[r.s];
+      var isSel = r.id === st.selected;
+      var pending = r.s === 'held' || r.s === 'unsure';
+      var bg = isSel ? '#E4EEFB' : (r.flash ? '#EAF5EE' : t.row);
+      var muted = r.s === 'voided' || r.s === 'fixed';
+      if (isSel) {
+        var a = agents[r.agent];
+        var dec = st.decided[r.id];
+        sel = {
+          id: r.id, item: r.item, amount: r.amount, status: r.label, chipStyle: chip(t), dotStyle: dot(t),
+          agentName: a.name, agentKey: a.key, parts: self.parts(r.full), reason: r.reason || '', risk: r.risk, check: r.check,
+          checkStyle: 'font-size:13.5px;font-weight:700;color:' + (r.check === 'Match' ? '#17603B' : (r.check === 'Unsure' ? '#7A4F00' : '#9A1C13')),
+          isUnsure: r.check === 'Unsure',
+          hasFix: !!r.fix && pending, noFix: !r.fix && pending, fix: r.fix || '', fixShort: r.fixShort || '',
+          pending: pending, isSharp: pending && !!r.sharp, notSharp: pending && !r.sharp, sharpNote: pending && !!r.sharp,
+          approveLabel: r.fix ? 'Approve as is' : 'Approve, charge ' + r.amount,
+          approveStyle: 'flex:1;height:48px;border:' + (r.fix ? '1px solid #0F1215' : 'none') + ';border-radius:4px;background:' + (r.fix ? '#FFFFFF' : '#0F1215') + ';color:' + (r.fix ? '#0F1215' : '#FFFFFF') + ';font:600 14.5px \'Schibsted Grotesk\',system-ui,sans-serif;cursor:pointer',
+          holdLabel: st.holding ? 'Keep holding' : 'Hold to approve 8.5',
+          holdAria: 'Press and hold to approve size 8.5 as is and charge ' + r.amount,
+          ringOffset: (69.12 * (1 - st.progress)).toFixed(2),
+          holdStart: function (e) { if (e && e.preventDefault) e.preventDefault(); self.holdBegin(r.id); },
+          holdStop: function () { self.holdEnd(); },
+          holdKeyDown: function (e) { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!e.repeat) self.holdBegin(r.id); } },
+          holdKeyUp: function (e) { if (e.key === ' ' || e.key === 'Enter') self.holdEnd(); },
+          approve: function () { self.decide(r.id, 'approved'); },
+          reject: function () { self.decide(r.id, 'rejected'); },
+          acceptFix: function () { self.decide(r.id, 'fixed'); },
+          decidedNow: !!dec, took: dec ? dec.took : '',
+          receiptTitle: dec ? (dec.kind === 'approved' ? 'Approved and captured' : (dec.kind === 'rejected' ? 'Rejected, payment voided' : 'Fix accepted, ' + r.fixId + ' charged')) : '',
+          charged: dec ? (dec.kind === 'rejected' ? '$0.00' : r.amount) : '',
+          undo: function () { self.undo(r.id); },
+          hasReplacedBy: !!r.replacedBy, replacedBy: r.replacedBy || '', goReplacedBy: function () { self.setState({ selected: r.replacedBy, filter: 'all' }); },
+          hasReplaces: !!r.replaces, replaces: r.replaces || '', goReplaces: function () { self.setState({ selected: r.replaces, filter: 'all' }); },
+          hasEvidence: !!r.evidence, steps: stepsFor(r)
+        };
+        for (var q = 0; q < sel.steps.length; q++) { sel.steps[q].notLast = q < sel.steps.length - 1; }
+      }
+      var fixCell = '', fixTitle = '', fixColor = 'color:#4D5560';
+      if (r.fix && pending) { fixCell = r.fixCell; fixTitle = r.fix; fixColor = 'color:#0A55B0;font-weight:600'; }
+      else if (r.s === 'fixed') { fixCell = 'Taken, now ' + r.replacedBy; fixTitle = 'Replaced by ' + r.replacedBy; fixColor = 'color:#0A55B0'; }
+      else if (r.replaces) { fixCell = 'Replaces ' + r.replaces; fixTitle = fixCell; fixColor = 'color:#0A55B0'; }
+      else if (r.fixText) { fixCell = r.fixText; fixTitle = r.fixText; }
+      else if (pending) { fixCell = 'No catalog match'; }
+      return {
+        isGroup: false, isRow: true, id: r.id, item: r.item, amount: r.amount, status: r.label, risk: r.risk,
+        agentName: agents[r.agent].name, showAgent: !grouped,
+        idCellStyle: 'display:flex;flex-direction:column;gap:2px;padding-left:' + (grouped ? '22px' : '0'),
+        decision: pending ? 'Waiting' : r.decision, time: pending ? '' : r.time,
+        isMatch: !r.short, hasDiff: !!r.short, short: r.short ? self.parts(r.short) : [],
+        segs: self.segs(r.risk), fixCell: fixCell, fixTitle: fixTitle, fixStyle: 'font-size:13.5px;' + fixColor,
+        pressed: isSel ? 'true' : 'false',
+        rowClass: 'row' + (r.isNew ? ' slidein' : ''),
+        rowStyle: bg ? 'background:' + bg : '',
+        textStyle: muted ? 'color:#5E6670' : '',
+        amountStyle: 'text-align:right;font-size:13.5px;' + (muted ? 'color:#5E6670;text-decoration:line-through' : ''),
+        idStyle: 'border:none;background:transparent;padding:0;min-height:28px;font-size:13.5px;cursor:pointer;text-align:left;text-underline-offset:3px;text-decoration:underline;' +
+          (isSel ? 'color:#0B63CE;font-weight:600;text-decoration-color:#0B63CE' : 'color:#0F1215;text-decoration-color:#C9CFD5'),
+        chipStyle: chip(t), dotStyle: dot(t),
+        decisionStyle: pending ? 'color:#7A4F00;font-weight:600' : (r.decision === 'Auto' ? 'color:#4D5560' : 'color:#0F1215;font-weight:600'),
+        timeStyle: 'font-size:12.5px;' + (r.fast ? 'color:#A8380A;font-weight:600' : 'color:#4D5560'),
+        select: function () { self.setState({ selected: r.id }); }
+      };
+    }
+
+    var lines = [];
+    var shown = 0;
+    if (st.grouped) {
+      var order = ['scout', 'claude'];
+      for (var g = 0; g < order.length; g++) {
+        (function (key) {
+          var a = agents[key];
+          var kids = [];
+          for (var j = 0; j < all.length; j++) { if (all[j].agent === key && inFilter(all[j])) kids.push(all[j]); }
+          var pct = Math.round(a.needed / a.total * 100);
+          var expanded = !st.collapsed[key];
+          lines.push({ isGroup: true, isRow: false, name: a.name, key: a.key, total: a.total, pct: pct, breakdown: a.breakdown,
+            trustFill: 'display:block;height:100%;width:' + pct + '%;background:#B98100',
+            expanded: expanded ? 'true' : 'false', chevStyle: 'transition:transform .14s;transform:rotate(' + (expanded ? 90 : 0) + 'deg)',
+            toggle: function () { var col = Object.assign({}, st.collapsed); col[key] = !col[key]; self.setState({ collapsed: col }); } });
+          for (var k = 0; k < kids.length; k++) {
+            if (expanded) { lines.push(makeRow(kids[k], true)); shown++; }
+            else if (kids[k].id === st.selected) { makeRow(kids[k], true); }
+          }
+        })(order[g]);
+      }
+    } else {
+      for (var f = 0; f < all.length; f++) { if (inFilter(all[f])) { lines.push(makeRow(all[f], false)); shown++; } }
+    }
+    if (!sel) {
+      for (var z = 0; z < all.length; z++) { if (all[z].id === st.selected) makeRow(all[z], false); }
+    }
+
+    var defs = [
+      { key: 'all', label: 'All' }, { key: 'held', label: 'Held' }, { key: 'fixed', label: 'Fixed' },
+      { key: 'captured', label: 'Captured' }, { key: 'voided', label: 'Voided' }, { key: 'disputed', label: 'Disputed' }
+    ];
+    var filters = [];
+    for (var d = 0; d < defs.length; d++) {
+      (function (df) {
+        var on = df.key === st.filter;
+        filters.push({
+          label: df.label, count: counts[df.key], pressed: on ? 'true' : 'false',
+          style: 'flex:1 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:8px;height:44px;padding:0 14px;border:none;font:600 14px \'Schibsted Grotesk\',system-ui,sans-serif;cursor:pointer;' +
+            (on ? 'background:#0F1215;color:#FFFFFF' : 'background:#FFFFFF;color:#0F1215'),
+          countStyle: 'font-size:12.5px;font-weight:500;' + (on ? 'color:#FFE58A' : 'color:#4D5560'),
+          pick: function () { self.setState({ filter: df.key }); }
+        });
+      })(defs[d]);
+    }
+
+    return {
+      heroTitle: heldNow === 0 ? 'Nothing needs you right now' : (heldNow + (heldNow === 1 ? ' order needs you' : ' orders need you')),
+      heldNow: heldNow, fixedCount: fixedCount, justReset: st.justReset,
+      lines: lines, noRows: shown === 0, shownCount: shown, filters: filters, sel: sel,
+      groupPressed: st.grouped ? 'true' : 'false',
+      groupBtnStyle: 'height:44px;padding:0 14px;border:1px solid #0F1215;border-radius:4px;display:inline-flex;align-items:center;gap:8px;font:600 14px \'Schibsted Grotesk\',system-ui,sans-serif;cursor:pointer;' +
+        (st.grouped ? 'background:#0F1215;color:#FFFFFF' : 'background:#FFFFFF;color:#0F1215'),
+      toggleGroup: function () { self.setState({ grouped: !st.grouped }); },
+      resetDemo: function () { self.holdEnd(); self.mountT = Date.now(); var fresh = self.initialState(); fresh.justReset = true; self.setState(fresh); }
+    };
+  }
+}
+</script>
+</body>
+</html>

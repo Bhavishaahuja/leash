@@ -65,23 +65,27 @@ if (agGridLicenseKey) {
 // what a group row's name is when an old order has no agent on it
 const UNKNOWN_AGENT = 'Unknown agent'
 
-// Quartz, pulled toward the app's palette so the grid doesn't look bolted on
+// Quartz, reading the tokens in index.css so the grid restyles with the rest of the app
 const gridTheme = themeQuartz.withParams({
   fontFamily: 'inherit',
   fontSize: 14,
-  foregroundColor: '#1d2a2a',
-  backgroundColor: '#ffffff',
-  headerBackgroundColor: '#efede6',
-  headerTextColor: '#5c6a68',
-  headerFontWeight: 600,
-  headerFontSize: 12,
-  borderColor: '#e2dfd6',
-  rowHoverColor: '#f5f4ef',
-  selectedRowBackgroundColor: '#e3eee9',
-  accentColor: '#2c5e52',
+  foregroundColor: 'var(--ink)',
+  backgroundColor: 'var(--surface)',
+  headerBackgroundColor: 'var(--surface)',
+  headerTextColor: 'var(--ink-muted)',
+  headerFontFamily: 'var(--mono)',
+  headerFontWeight: 500,
+  headerFontSize: 11.5,
+  // a 1px ink rule under the headers, per the spec
+  headerRowBorder: { color: 'var(--ink)' },
+  borderColor: 'var(--border)',
+  // hover is drawn as an outline in index.css, not a fill
+  rowHoverColor: 'transparent',
+  selectedRowBackgroundColor: 'var(--primary-soft)',
+  accentColor: 'var(--focus)',
   wrapperBorder: false,
   wrapperBorderRadius: 0,
-  rowBorder: { color: '#e2dfd6' },
+  rowBorder: { color: 'var(--divider)' },
   columnBorder: false,
   spacing: 7,
 })
@@ -162,8 +166,8 @@ export function DashboardPage() {
       // still sorts newest first when hidden on a phone
       sort: 'desc',
       hide: narrow,
-      width: 120,
-      cellClass: 'muted',
+      width: 150,
+      cellClass: 'muted mono',
     }
     const orderColumn: ColDef<Order> = {
       headerName: 'Order',
@@ -451,7 +455,7 @@ export function DashboardPage() {
                 autoGroupColumnDef={autoGroupColumnDef}
                 groupDefaultExpanded={-1}
                 suppressAggFuncInHeader
-                rowHeight={60}
+                rowHeight={50}
                 headerHeight={40}
                 domLayout="autoHeight"
                 quickFilterText={search}
